@@ -35,8 +35,11 @@ uv run --no-sync python scripts/windows/configure_v0.py --companion 添田
 
 ```powershell
 bash ./autonomous-action.sh --dry-run
-powershell -NoProfile -File scripts\windows\register-heartbeat.ps1
+powershell -NoProfile -File scripts\windows\register-heartbeat.ps1 -IntervalMinutes 60
 ```
+
+間隔は 60 分にしている。本家の cron は 20 分おきだが、「話したい」欲求は 3 時間で溜まる設定なので、
+20 分おきだと大半の起床が空振りで利用枠だけ減る。
 
 `setup.cmd` をもう一度走らせると `.mcp.json` から `notify` が消える。そのときは `configure_v0.py` も走らせ直す。
 
