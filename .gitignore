@@ -94,3 +94,11 @@ references/
 
 # Per-person seeds for relationship-mcp (contain private facts)
 .local/
+
+# The agent's own life: personality, wants, routines and notes. This fork is
+# public, so these stay on the machine (back them up somewhere private).
+SOUL.md
+TODO.md
+ROUTINES.md
+notes/
+diary/
