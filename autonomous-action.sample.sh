@@ -21,6 +21,16 @@ export PATH="/opt/homebrew/bin:${PATH:-/usr/local/bin:/usr/bin:/bin:/usr/sbin:/s
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Windows (Git Bash): the native jq.exe ends every line with CRLF. The stray
+# "\r" lands in heartbeat-session-id, every --resume then misses, and each
+# heartbeat silently starts a fresh session. Strip it, but keep jq's own exit
+# status, because the `jq empty` validity check below depends on it.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
+    ;;
+esac
+
 # Load environment variables (API keys, etc.)
 if [ -f "$SCRIPT_DIR/.env" ]; then
   set -a
@@ -143,8 +153,12 @@ if [ "$SKIP_SCHEDULE" = false ] && [ "$HOUR" -eq 7 ] && [ -f "$SCHEDULE_CONF" ];
   CURRENT_DAY=$(grep "^DAYTIME_CHANCE=" "$SCHEDULE_CONF" | cut -d= -f2)
   CURRENT_NIGHT=$(grep "^NIGHT_CHANCE=" "$SCHEDULE_CONF" | cut -d= -f2)
   if [ "${CURRENT_DAY:-50}" -lt 50 ] || [ "${CURRENT_NIGHT:-10}" -lt 10 ]; then
-    sed -i '' 's/^DAYTIME_CHANCE=.*/DAYTIME_CHANCE=50/' "$SCHEDULE_CONF"
-    sed -i '' 's/^NIGHT_CHANCE=.*/NIGHT_CHANCE=10/' "$SCHEDULE_CONF"
+    # `-i.bak` works with both BSD sed (macOS) and GNU sed (Linux, Git Bash);
+    # `-i ''` is BSD-only and makes GNU sed treat '' as a file name.
+    sed -i.bak \
+      -e 's/^DAYTIME_CHANCE=.*/DAYTIME_CHANCE=50/' \
+      -e 's/^NIGHT_CHANCE=.*/NIGHT_CHANCE=10/' \
+      "$SCHEDULE_CONF" && rm -f "$SCHEDULE_CONF.bak"
     echo "[自動起床] DAYTIME_CHANCE: ${CURRENT_DAY}→50, NIGHT_CHANCE: ${CURRENT_NIGHT}→10" >> "$LOG_FILE"
   fi
 fi
@@ -403,6 +417,17 @@ if [ -n "$ALLOWED_TOOLS" ] && [ "$ALLOWED_TOOLS" != "null" ]; then
   ALLOWED_TOOL_ARGS=(--allowedTools "$ALLOWED_TOOLS")
 fi
 
+# Heartbeat model and effort (optional, from schedule.conf or .env). Unset means
+# whatever the user's Claude Code settings default to, which may be the largest
+# model at a high effort: twenty-minute heartbeats then eat that quota.
+MODEL_ARGS=()
+if [ -n "${HEARTBEAT_MODEL:-}" ]; then
+  MODEL_ARGS+=(--model "$HEARTBEAT_MODEL")
+fi
+if [ -n "${HEARTBEAT_EFFORT:-}" ]; then
+  MODEL_ARGS+=(--effort "$HEARTBEAT_EFFORT")
+fi
+
 # テストモードならプロンプトを差し替え
 if [ -n "$TEST_PROMPT_STRING" ]; then
   PROMPT="$TEST_PROMPT_STRING"
@@ -417,6 +442,7 @@ if [ "$DRY_RUN" = true ]; then
   echo "[ROUTINE_RAND=$ROUTINE_RAND]" >> "$LOG_FILE"
   echo "[TIME_RULE] $TIME_RULE" >> "$LOG_FILE"
   echo "[ROUTINE_MODE] $ROUTINE_MODE" >> "$LOG_FILE"
+  echo "[MODEL_ARGS] ${MODEL_ARGS[*]:-(settings default)}" >> "$LOG_FILE"
   echo "" >> "$LOG_FILE"
   echo "--- PROMPT ---" >> "$LOG_FILE"
   echo "$PROMPT" >> "$LOG_FILE"
@@ -441,12 +467,12 @@ else
     if [ -n "$TIMEOUT_CMD" ]; then
       RESULT_JSON=$(echo "$PROMPT" | "$TIMEOUT_CMD" 20m claude -p \
         --output-format json \
-        "${ALLOWED_TOOL_ARGS[@]}" 2>&1)
+        "${ALLOWED_TOOL_ARGS[@]}" "${MODEL_ARGS[@]}" 2>&1)
       CLAUDE_EXIT=$?
     else
       RESULT_JSON=$(echo "$PROMPT" | claude -p \
         --output-format json \
-        "${ALLOWED_TOOL_ARGS[@]}" 2>&1)
+        "${ALLOWED_TOOL_ARGS[@]}" "${MODEL_ARGS[@]}" 2>&1)
       CLAUDE_EXIT=$?
     fi
     if [ "$CLAUDE_EXIT" -eq 124 ]; then
@@ -475,13 +501,13 @@ else
       RESULT=$(echo "$PROMPT" | "$TIMEOUT_CMD" 20m claude -p \
         --resume "$SESSION_ID" \
         --output-format json \
-        "${ALLOWED_TOOL_ARGS[@]}" 2>&1)
+        "${ALLOWED_TOOL_ARGS[@]}" "${MODEL_ARGS[@]}" 2>&1)
       CLAUDE_EXIT=$?
     else
       RESULT=$(echo "$PROMPT" | claude -p \
         --resume "$SESSION_ID" \
         --output-format json \
-        "${ALLOWED_TOOL_ARGS[@]}" 2>&1)
+        "${ALLOWED_TOOL_ARGS[@]}" "${MODEL_ARGS[@]}" 2>&1)
       CLAUDE_EXIT=$?
     fi
     if [ "$CLAUDE_EXIT" -eq 124 ]; then

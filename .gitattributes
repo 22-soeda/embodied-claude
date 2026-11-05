@@ -1,0 +1,6 @@
+# Keep shell and Bun scripts LF on Windows checkouts (core.autocrlf=true would
+# otherwise turn them into CRLF, and Git Bash then fails on "$'\r'").
+*.sh text eol=lf
+*.ts text eol=lf
+# schedule.conf and desires.conf are sourced/parsed as shell-style config.
+*.conf text eol=lf
