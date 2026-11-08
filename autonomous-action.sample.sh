@@ -294,7 +294,14 @@ if [ "$SKIP_SCHEDULE" = false ]; then
     if [ "$DRY_RUN" = false ]; then
       echo "$TODAY" > "$LAST_SESSION_DATE_FILE"
       echo "[朝の再構成] 初回セッション: $TODAY" >> "$LOG_FILE"
-
+      # 前日のセッションは引き継がずに新しく始める。--resume を続けると文脈が
+      # 一日中積み上がる（2026-11-08 には 3 時間で 4.6 万→10.8 万トークン）。
+      # 前日に残すべきことは、毎回の心残りチェックで記憶や TODO.md に書いてある。
+      # PetitOnes も日付が変わったら Heartbeat のセッションを捨てている。
+      if [ -f "$SCRIPT_DIR/heartbeat-session-id" ]; then
+        rm -f "$SCRIPT_DIR/heartbeat-session-id"
+        echo "[朝の再構成] 前日のセッションを閉じた" >> "$LOG_FILE"
+      fi
     fi
   fi
 fi

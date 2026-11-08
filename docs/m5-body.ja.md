@@ -65,6 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\register-m5-
 - **1 回の返事は 6 手まで**：`[head] max_turns`。memory を引く・残すなどの道具の呼び出しも 1 手に数える
 - **起動のたびに確かめる**：頭がつながった MCP サーバーごとの状態と道具の数、文脈の大きさをログに出す。落ちたサーバーは ERROR で、文脈が 6 万トークンを超えたら WARNING で出る。ウェブの画面にも「頭」の欄と、落ちたサーバーの赤い印が出る
 - セッションの状態は `m5-link/state/head-session.json`。消すと次の起動で新しく始まる
+- 定期起床（`autonomous-action.sh`）のセッションも、その日最初の起床（朝の再構成）で前日のものを捨てて新しく始める。本家の作りは捨てずに引き継ぎ続けるので、文脈が一日中積み上がっていた
 
 ### 体の出来事
 
