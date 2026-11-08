@@ -284,3 +284,14 @@ class MemoryStats:
     by_emotion: dict[str, int]
     oldest_timestamp: str | None
     newest_timestamp: str | None
+
+
+@dataclass(frozen=True)
+class SleepStats:
+    """What one sleep (nightly consolidation) did, or would do in a dry run."""
+
+    merged: list[dict[str, Any]]  # [{"group": [id, ...], "into": "preview"}]
+    decayed: list[dict[str, Any]]  # [{"id": ..., "importance": "3→2"}]
+    forgotten: list[dict[str, Any]]  # [{"id": ..., "content": "..."}]
+    protected: int
+    dry_run: bool

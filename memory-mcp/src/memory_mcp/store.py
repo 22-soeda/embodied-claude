@@ -1057,6 +1057,52 @@ class MemoryStore:
             self._working_memory.remove(memory_id)
         return result
 
+    async def merge_memories(
+        self,
+        source_ids: list[str],
+        merged_content: str,
+        importance: int,
+        emotion: str,
+        category: str,
+    ) -> Memory:
+        """Fold several memories into one new memory (used by the nightly sleep).
+
+        The new memory takes over the sources' links to memories outside the
+        group; then the sources are deleted. Adapted from PetitOnes/m5-petit-memory
+        (Apache License 2.0); it deletes with this store's delete().
+        """
+        source_set = set(source_ids)
+        outside_links: list[MemoryLink] = []
+        outside_linked_ids: set[str] = set()
+        for source_id in source_ids:
+            memory = await self.get_by_id(source_id)
+            if memory is None:
+                continue
+            outside_links += [link for link in memory.links if link.target_id not in source_set]
+            outside_linked_ids |= {lid for lid in memory.linked_ids if lid not in source_set}
+
+        merged = await self.save(
+            content=merged_content,
+            emotion=emotion,
+            importance=importance,
+            category=category,
+            auto_link=False,  # it would link to the sources, which are deleted below
+        )
+
+        if outside_links or outside_linked_ids:
+            unique_links: dict[tuple[str, str], MemoryLink] = {}
+            for link in outside_links:
+                unique_links.setdefault((link.target_id, link.link_type), link)
+            await self.update_memory_fields(
+                merged.id,
+                links=json.dumps([link.to_dict() for link in unique_links.values()]),
+                linked_ids=",".join(sorted(outside_linked_ids)),
+            )
+
+        for source_id in source_ids:
+            await self.delete(source_id)
+        return merged
+
     # ── update ──────────────────────────────────
 
     async def update(

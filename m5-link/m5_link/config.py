@@ -52,6 +52,11 @@ speed = 1.05
 [heartbeat]
 enabled = true     # run autonomous-action.sh on a schedule, instead of Task Scheduler
 interval_minutes = 60
+
+[nightly]
+# As PetitOnes does it: a diary page from the day's memories, then the memory sleep.
+diary_at = "23:50"
+memory_sleep_at = "04:05"   # after the conversation session is closed at day_starts_at
 """
 
 
@@ -94,12 +99,19 @@ class HeartbeatConfig:
 
 
 @dataclass(frozen=True)
+class NightlyConfig:
+    diary_at: str = "23:50"         # "" to turn off
+    memory_sleep_at: str = "04:05"  # "" to turn off
+
+
+@dataclass(frozen=True)
 class LinkConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     head: HeadConfig = field(default_factory=HeadConfig)
     ears: EarsConfig = field(default_factory=EarsConfig)
     mouth: MouthConfig = field(default_factory=MouthConfig)
     heartbeat: HeartbeatConfig = field(default_factory=HeartbeatConfig)
+    nightly: NightlyConfig = field(default_factory=NightlyConfig)
 
 
 def load_config(path: Path = CONFIG_PATH) -> LinkConfig:
@@ -112,4 +124,5 @@ def load_config(path: Path = CONFIG_PATH) -> LinkConfig:
         ears=EarsConfig(**raw.get("ears", {})),
         mouth=MouthConfig(**raw.get("mouth", {})),
         heartbeat=HeartbeatConfig(**raw.get("heartbeat", {})),
+        nightly=NightlyConfig(**raw.get("nightly", {})),
     )

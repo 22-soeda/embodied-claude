@@ -48,3 +48,20 @@ class ServerConfig:
             name=os.getenv("MCP_SERVER_NAME", "memory-mcp"),
             version=os.getenv("MCP_SERVER_VERSION", "0.4.6"),
         )
+
+
+@dataclass(frozen=True)
+class SleepConfig:
+    """Sleep (nightly consolidation, decay and forgetting) settings.
+
+    Adapted from PetitOnes/m5-petit-memory (Apache License 2.0), where the
+    PetitOnes run it for their three characters every night at 04:05.
+    """
+
+    min_age_days: int = 14  # memories younger than this are left alone
+    similarity_threshold: float = 0.85  # merge memories of one category this similar
+    decay_retention_threshold: float = 0.4  # below this retention score, importance goes down by one
+    forget_min_age_days: int = 14
+    forget_max_access: int = 3  # recalled this often or more: not forgotten
+    protected_importance: int = 4  # this important or more: never touched
+    protected_emotions: tuple[str, ...] = ("happy", "moved", "excited", "surprised")

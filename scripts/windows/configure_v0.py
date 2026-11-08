@@ -21,6 +21,10 @@ It is safe to re-run: existing files are kept, only missing pieces are added.
    goes down when the companion actually talks to the body), so it is taken
    out of desires.conf, and desire-system/.env points desire-system at the
    body's desires (m5-link/desire-config.json) and body state.
+6. Its own documents, as PetitOnes' characters keep them: SOUL_REFLECTIONS.md
+   and REFLECTION_INDEX.md from examples/, notes/ and diary/ with a README,
+   and the textbook's routines (diary, a summary of the day's talk, reading
+   SOUL.md again) added to ROUTINES.md. The heartbeat may edit these.
 """
 
 from __future__ import annotations
@@ -63,9 +67,32 @@ HEARTBEAT_ALLOW = [
     "Grep",
     "Edit(./TODO.md)",
     "Edit(./ROUTINES.md)",
+    # Its own documents, as in PetitOnes' textbook ("2. 自分を知る"): the agent
+    # keeps them itself. autonomous-action.sh gives the order of changes
+    # (reason in SOUL_REFLECTIONS.md first) and what not to change alone.
+    "Edit(./SOUL.md)",
+    "Edit(./SOUL_REFLECTIONS.md)",
+    "Edit(./REFLECTION_INDEX.md)",
+    "Write(./notes/**)",
     "Edit(./notes/**)",
+    "Write(./diary/**)",
     "Edit(./diary/**)",
 ]
+
+# Routines from PetitOnes' textbook (petit/templates/ROUTINES.md, Apache-2.0),
+# added to ROUTINES.md when missing. The diary is also written at night by
+# m5-link from the day's memories when the agent has not written it itself.
+REFLECTION_ROUTINES = [
+    ("日記を書く（夜。今日あったこと・感じたこと・気づいたことを diary/YYYY-MM-DD.txt に短く）", "daily"),
+    ("{companion}との会話まとめ（今日話したことで残したいことを記憶に。「忘れて」と言われたことは残さない）",
+     "daily"),
+    ("SOUL.md の読み返し（空欄を自分の言葉で埋める。変えたいところは先に SOUL_REFLECTIONS.md に理由を書く）",
+     "weekly"),
+]
+FOLDER_READMES = {
+    "notes": "# notes\n\n詩・発見・提案を置く。詩を書いたら必ずここに。\n",
+    "diary": "# diary\n\n一日一枚 `YYYY-MM-DD.txt`。夜に短く。要約 `diary_summary.md` は仕組みが作る。\n",
+}
 
 V0_DAY_TIME_RULE = (
     "体はまだない。目も耳も口もなく、部屋に人がいるかは分からない。"
@@ -219,6 +246,39 @@ def add_talk_desire(companion: str) -> None:
     print(f"added     desires.conf {TALK_DESIRE_NAME}")
 
 
+def set_up_reflection(companion: str) -> None:
+    """The documents PetitOnes' characters deepen their thinking in (textbook, "2. 自分を知る")."""
+    copy_if_missing("examples/SOUL_REFLECTIONS.sample.md", "SOUL_REFLECTIONS.md")
+    copy_if_missing("examples/REFLECTION_INDEX.sample.md", "REFLECTION_INDEX.md")
+    for folder, readme in FOLDER_READMES.items():
+        path = REPO_ROOT / folder / "README.md"
+        if not path.exists():
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(readme, encoding="utf-8", newline="\n")
+            print(f"created   {folder}/README.md")
+
+    routines = REPO_ROOT / "ROUTINES.md"
+    text = routines.read_text(encoding="utf-8")
+    missing = [(name.format(companion=companion), interval) for name, interval in REFLECTION_ROUTINES
+               if name.format(companion=companion).split("（")[0] not in text]
+    if missing:
+        rows = "".join(f"| {name} | {interval} | — |\n" for name, interval in missing)
+        routines.write_text(_insert_table_rows(text, rows), encoding="utf-8", newline="\n")
+        print(f"added     ROUTINES.md {len(missing)} routines from the PetitOnes textbook")
+
+
+def _insert_table_rows(text: str, rows: str) -> str:
+    """Append rows right after the last line of the first Markdown table (or at the end)."""
+    lines = text.splitlines(keepends=True)
+    table_lines = [index for index, line in enumerate(lines) if line.lstrip().startswith("|")]
+    if not table_lines:
+        return text.rstrip("\n") + "\n\n" + rows
+    end = table_lines[0]
+    while end + 1 < len(lines) and lines[end + 1].lstrip().startswith("|"):
+        end += 1
+    return "".join(lines[: end + 1]) + rows + "".join(lines[end + 1 :])
+
+
 def remove_talk_desire() -> None:
     path = REPO_ROOT / "desires.conf"
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -285,6 +345,7 @@ def main() -> None:
     copy_if_missing("examples/SOUL.sample.md", "SOUL.md")
     copy_if_missing("examples/TODO.sample.md", "TODO.md")
     copy_if_missing("examples/ROUTINES.sample.md", "ROUTINES.md")
+    set_up_reflection(args.companion)
 
     script = REPO_ROOT / "autonomous-action.sh"
     if args.refresh_script and script.exists():

@@ -9,6 +9,7 @@
     POST /api/face      {"mood", "ms"?}
     POST /api/snapshot  take a picture; returns {"path"} under captures/
     POST /api/heartbeat run one heartbeat now
+    POST /api/diary     {"date"?}: write that day's diary page now (normally 23:50)
 
 The body needs the token. Everything else is open from this PC (loopback,
 which is how the body MCP calls in) and needs the token from anywhere else.
@@ -19,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import time
-from datetime import datetime
+from datetime import date, datetime
 
 from aiohttp import web
 
@@ -27,12 +28,13 @@ from .body import Body
 from .config import PACKAGE_DIR, REPO_ROOT, LinkConfig
 from .conversation import CAPTURE_DIR, DIARY_READER, Conversation
 from .heartbeat import Heartbeat
+from .nightly import Nightly
 
 LOOPBACK = {"127.0.0.1", "::1"}
 
 
 def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartbeat: Heartbeat,
-              version: str) -> web.Application:
+              nightly: Nightly, version: str) -> web.Application:
     token = config.server.token
 
     def has_token(request: web.Request) -> bool:
@@ -109,6 +111,11 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
 
     running_tasks: set[asyncio.Task] = set()  # keep a reference until each finishes
 
+    async def write_diary(request: web.Request) -> web.Response:
+        payload = await request.json() if request.can_read_body else {}
+        day = date.fromisoformat(payload["date"]) if payload.get("date") else None
+        return web.json_response({"page": await nightly.write_diary(day)})
+
     async def run_heartbeat(_: web.Request) -> web.Response:
         if heartbeat.is_running:
             return web.json_response({"started": False, "reason": "already running"})
@@ -129,5 +136,6 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         web.post("/api/snapshot", snapshot),
         web.get("/captures/{name}", capture_file),
         web.post("/api/heartbeat", run_heartbeat),
+        web.post("/api/diary", write_diary),
     ])
     return app

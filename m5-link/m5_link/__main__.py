@@ -23,6 +23,7 @@ from .conversation import Conversation
 from .ears import Ears
 from .head import Head
 from .heartbeat import Heartbeat
+from .nightly import Nightly
 from .mouth import Mouth
 from .server import build_app
 
@@ -92,10 +93,11 @@ async def main() -> None:
     ears = Ears(config.ears)
     mouth = Mouth(config.mouth)
     head = Head(config.head)
-    heartbeat = Heartbeat(config.heartbeat, diary, desires)
+    heartbeat = Heartbeat(config.heartbeat, diary, desires, config.head.companion_name)
+    nightly = Nightly(config.nightly, config.head, diary)
     conversation = Conversation(body, ears, head, mouth, diary, desires)
 
-    runner = web.AppRunner(build_app(config, body, conversation, heartbeat, version))
+    runner = web.AppRunner(build_app(config, body, conversation, heartbeat, nightly, version))
     await runner.setup()
     await web.TCPSite(runner, config.server.host, config.server.port).start()
 
@@ -110,6 +112,7 @@ async def main() -> None:
         asyncio.create_task(keep_head(head)),
         asyncio.create_task(heartbeat.run_forever()),
         asyncio.create_task(desires.run_forever()),
+        asyncio.create_task(nightly.run_forever()),
     ]
     try:
         await asyncio.gather(*background)

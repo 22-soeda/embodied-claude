@@ -40,8 +40,10 @@ DIARY_READER = "heartbeat"  # this session's read mark in the body diary
 
 
 class Heartbeat:
-    def __init__(self, config: HeartbeatConfig, diary: BodyDiary, desires: Desires) -> None:
+    def __init__(self, config: HeartbeatConfig, diary: BodyDiary, desires: Desires,
+                 companion_name: str) -> None:
         self._config = config
+        self._companion_name = companion_name  # the script names the companion in its rules
         self._diary = diary
         self._desires = desires
         self.last_started: datetime | None = None
@@ -85,6 +87,7 @@ class Heartbeat:
                 env=_heartbeat_environment() | {
                     "BODY_DIGEST_FILE": _posix_path(BODY_DIGEST_PATH),
                     "DESIRE_DIGEST_FILE": _posix_path(DESIRE_DIGEST_PATH),
+                    "COMPANION_NAME": self._companion_name,
                 },
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,

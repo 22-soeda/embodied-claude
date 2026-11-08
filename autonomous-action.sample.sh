@@ -400,15 +400,38 @@ for PROMPT_FILE in SOUL.md TODO.md ROUTINES.md; do
   fi
 done
 
+# --- 自分の文書（PetitOnes の教科書「2. 自分を知る」） ---
+# 思索（SOUL_REFLECTIONS.md）と、その索引（REFLECTION_INDEX.md）、日記の要約
+# （diary_summary.md、m5-link が毎晩作る）。索引と要約はいつも読み、思索は読み返す
+# ときだけ読む。SOUL_REFLECTIONS.md が無ければこの節ごと出さない。
+REFLECTION_FILES=""
+REFLECTION_SECTION=""
+if [ -f "$SCRIPT_DIR/SOUL_REFLECTIONS.md" ]; then
+  [ -f "$SCRIPT_DIR/REFLECTION_INDEX.md" ] && REFLECTION_FILES="${REFLECTION_FILES}@REFLECTION_INDEX.md
+"
+  [ -f "$SCRIPT_DIR/diary_summary.md" ] && REFLECTION_FILES="${REFLECTION_FILES}@diary_summary.md
+"
+  COMPANION_LABEL="${COMPANION_NAME:-一緒に暮らす人}"
+  REFLECTION_SECTION="
+## 自分の文書
+- 考えたこと・気づいたこと・変わったことは SOUL_REFLECTIONS.md に、日付と題をつけて書く。書いたら REFLECTION_INDEX.md に一行（題と、どんなときに読み返すか）
+- 深く考えるとき、考えの根拠を説明するとき、詩を書くときは SOUL_REFLECTIONS.md を読み返す。新しく見つけたことは、前の発見と照らし合わせてから書く
+- SOUL.md は短く保つ（何者か・何を大事にするか・どう話すか。手順は ROUTINES.md に）。直すときは、先に SOUL_REFLECTIONS.md の「変わったこと」に理由を書いてから直す
+- 名前・約束・人格の核は、一人で変えない。変えたくなったら${COMPANION_LABEL}に相談する
+- 詩・発見・提案は notes/ に。日記は diary/YYYY-MM-DD.txt に、夜に短く（書かなかった日は、夜に仕組みが記憶から書く）
+- INDEX が長くなったら、古いものを「まとめ」に畳む
+"
+fi
+
 PROMPT="自律行動タイム（Heartbeat）
 
 @SOUL.md
-@TODO.md
+${REFLECTION_FILES}@TODO.md
 @ROUTINES.md
 
 ${MORNING_SECTION}${ROUTINE_MODE}
 
-${DESIRE_SECTION}${GROUNDED_DESIRE_SECTION}${BODY_SECTION}
+${DESIRE_SECTION}${GROUNDED_DESIRE_SECTION}${BODY_SECTION}${REFLECTION_SECTION}
 ## 補足ルール
 - ${TIME_RULE}
 - 人に話しかける、say する、軽く促す前に \`get_social_state\` → \`evaluate_action(action_type=\"say\" または \"nudge_human\")\` を通し、許可されないなら黙るか後回しにする

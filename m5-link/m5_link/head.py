@@ -29,6 +29,7 @@ import shutil
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -83,7 +84,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
 
 SOUL.md
 {soul}
-"""
+{reflection_index}{diary_summary}"""
 
 CLOSE_THE_DAY_PROMPT = (
     "[区切り] 今日の会話はここで区切る。次の日のあなたは、この会話を覚えていない。"
@@ -345,10 +346,14 @@ class Head:
         return reply
 
     def _system_prompt(self) -> str:
+        """SOUL.md, and - as PetitOnes' heads always read them - the reflection index and diary summary."""
         soul_path = REPO_ROOT / "SOUL.md"
         soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else "（SOUL.md はまだない）"
         return SYSTEM_PROMPT_TEMPLATE.format(
-            companion=self._config.companion_name, day_starts_at=self._config.day_starts_at, soul=soul)
+            companion=self._config.companion_name, day_starts_at=self._config.day_starts_at, soul=soul,
+            reflection_index=_section("REFLECTION_INDEX.md（思索の索引。詳しくは SOUL_REFLECTIONS.md を Read）",
+                                      REPO_ROOT / "REFLECTION_INDEX.md"),
+            diary_summary=_section("diary_summary.md（最近の日記）", REPO_ROOT / "diary_summary.md"))
 
     def summary(self) -> dict:
         return {
@@ -361,6 +366,12 @@ class Head:
             "mcp": self.mcp_status,
             "model": self._config.model,
         }
+
+
+def _section(title: str, path: Path) -> str:
+    if not path.exists():
+        return ""
+    return f"\n{title}\n{path.read_text(encoding='utf-8').strip()}\n"
 
 
 def _prompt_tokens(usage: dict | None) -> int | None:

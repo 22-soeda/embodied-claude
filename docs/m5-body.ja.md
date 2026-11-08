@@ -95,6 +95,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\register-m5-
 - `scripts/windows/configure_v0.py --with-body` が `desire-system/.env` にこの設定を書き、タイマーの欲求（`desires.conf`）から「話したい」を抜く。タイマーの欲求には、記憶を刻む・振り返りなどの身の回りの促しだけが残る
 - ウェブの画面の「欲求」に、今の強さがバーで出る
 
+### 考えを深める仕組み（PetitOnes から）
+
+PetitOnes の子たちが考えを積み重ねている仕組みを、そのまま持ってきた。出典とライセンスは `THIRD_PARTY_NOTICES.md`。
+
+| もの | 何か | いつ読まれる | 誰が書く |
+|---|---|---|---|
+| `SOUL.md` | 人格の核。短く | いつも（起床と会話） | 本人。名前・約束・人格の核は一人で変えない |
+| `SOUL_REFLECTIONS.md` | 思索。大事な考えの根拠、発見、変わったこと。日付つき | 深く考えるとき、根拠を説明するとき、詩を書くとき | 本人 |
+| `REFLECTION_INDEX.md` | 思索の索引。一行ずつ | いつも（起床と会話） | 本人。思索を書いたら足す |
+| `notes/` | 詩・発見・提案 | 必要なとき | 本人 |
+| `diary/YYYY-MM-DD.txt` | 日記 | — | 本人が夜に。書かなかった日は、m5-link が 23:50 にその日の記憶と体の出来事から本人の口調で 2〜3 文書く |
+| `diary_summary.md` | 最新の日記と、その前 7 日の一行ずつ | いつも（起床と会話） | m5-link |
+
+直す順番は教科書のとおり：気づく → `SOUL_REFLECTIONS.md` に理由を書く → 必要なら `SOUL.md` か `ROUTINES.md` を直す → 索引を足す → 大きな変更は添田に伝える。起床のプロンプトがこの決まりを毎回渡す。`configure_v0.py` が器を `examples/` から写し、起床に書き込みを許し、教科書の習慣（日記・会話まとめ・週 1 の SOUL.md の読み返し）を `ROUTINES.md` に足す。
+
+**夜の記憶整理**：4:05 に memory-mcp の `memory-sleep`（PetitOnes の m5-petit-memory から移した）を回す。14 日以上前の記憶について、似たものをまとめ、薄れたものの重要度を下げ、重要度 1 で感情の無いほとんど思い出されない記憶を忘れる。重要度 4 以上・強い感情・「初めて」の記憶には触れない。手で試すときは `uv run --package memory-mcp --no-sync python -m memory_mcp.sleep --dry-run`。
+
+時刻は `m5-link.toml` の `[nightly]`。今日の日記を今すぐ書かせるときは `POST /api/diary`。
+
 ## 体に書き込む
 
 CoreS3 を USB-C でデスクトップかノートにつなぐ。
