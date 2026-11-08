@@ -79,6 +79,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\register-m5-
 20:12 近くに誰か来た
 ```
 
+定期起床の頭が `body` MCP の `say` で体からしゃべった言葉も、「自分から体の声で話しかけた「…」」として体の記録に入る。会話の頭は別のセッションなので、これが無いと、体から話しかけられて答えても、何の返事か分からなかった。既読の印は会話と定期起床で別々に持つので、定期起床が先に読んでも、会話の頭には届く。
+
 定期起床には、m5-link が `BODY_DIGEST_FILE` でファイルを渡し、`autonomous-action.sh` がプロンプトに入れてから消す。消えていれば既読になる。スケジュールで見送った回は消さないので、次の回に回る。M5 の体が無いときはこの節は出ない。頭は `body` MCP の `list_body_events` でも、さかのぼって読める。
 
 ## 体に書き込む

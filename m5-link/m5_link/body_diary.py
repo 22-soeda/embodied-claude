@@ -9,8 +9,17 @@ a few lines, and decides itself whether to mention it.
 PetitOnes' experience-daemon works the same way: record without calling the
 model, hand over a digest at the next wake-up.
 
-    state/body-diary/YYYYMMDD.jsonl   one event per line, only ever appended
-    state/body-diary/read-until       time of the newest event already handed over
+What the heartbeat says out loud through the body is written down here too
+("said", with the words). The conversation runs in another session, so
+without this, a reply to "そういえば…" from the body reached a head that did
+not know anything had been said.
+
+Two sessions read the diary - the conversation and the heartbeat - and each
+keeps its own read mark: the heartbeat reading first must not hide from the
+conversation what the body said a minute ago.
+
+    state/body-diary/YYYYMMDD.jsonl            one event per line, only ever appended
+    state/body-diary/read-until-<reader>       time of the newest event that reader was given
 """
 
 from __future__ import annotations
@@ -30,6 +39,7 @@ DESCRIPTIONS = {
     "near": "近くに誰か来た",
     "poked": "寝ているところをつつかれた",
     "battery_low": "電池が少なくなった",
+    "said": "自分から体の声で話しかけた",  # with the words; never merged with another
 }
 # Repeats of one kind closer together than this become one line: "持ち上げられた（3 回）".
 SAME_STRETCH_GAP_SECS = 10 * 60
@@ -42,6 +52,7 @@ LOOKBACK_DAYS = 7
 class DiaryEntry:
     kind: str
     at: float  # unix seconds
+    text: str = ""  # the words, for "said"
 
 
 @dataclass
@@ -52,42 +63,46 @@ class Stretch:
     first_at: float
     last_at: float
     count: int = 1
+    text: str = ""
 
 
 class BodyDiary:
     def __init__(self, directory: Path) -> None:
         self._directory = directory
-        self._read_until_path = directory / "read-until"
 
-    def record(self, kind: str, at: float | None = None) -> None:
+    def record(self, kind: str, at: float | None = None, text: str = "") -> None:
         if kind not in DESCRIPTIONS:
             return
         at = time.time() if at is None else at
+        line = {"at": round(at, 3), "kind": kind} | ({"text": text} if text else {})
         self._directory.mkdir(parents=True, exist_ok=True)
         with self._day_file(datetime.fromtimestamp(at)).open("a", encoding="utf-8") as file:
-            file.write(json.dumps({"at": round(at, 3), "kind": kind}) + "\n")
+            file.write(json.dumps(line, ensure_ascii=False) + "\n")
 
-    def unread(self) -> tuple[str, float]:
-        """The digest the head has not been given yet, and the time of its newest event."""
-        read_until = self.read_until()
+    def unread(self, reader: str) -> tuple[str, float]:
+        """The digest this reader has not been given yet, and the time of its newest event."""
+        read_until = self.read_until(reader)
         since = max(read_until, time.time() - LOOKBACK_DAYS * 86400)
         entries = [entry for entry in self._entries_since(since) if entry.at > read_until]
         if not entries:
             return "", read_until
         return format_digest(entries), entries[-1].at
 
-    def mark_read(self, until: float) -> None:
-        """Move the read mark forward (never back: the conversation and the heartbeat both read)."""
-        if until <= self.read_until():
+    def mark_read(self, reader: str, until: float) -> None:
+        """Move this reader's mark forward (never back)."""
+        if until <= self.read_until(reader):
             return
         self._directory.mkdir(parents=True, exist_ok=True)
-        self._read_until_path.write_text(f"{until:.3f}", encoding="utf-8")
+        self._read_until_path(reader).write_text(f"{until:.3f}", encoding="utf-8")
 
-    def read_until(self) -> float:
+    def read_until(self, reader: str) -> float:
         try:
-            return float(self._read_until_path.read_text(encoding="utf-8"))
+            return float(self._read_until_path(reader).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return 0.0
+
+    def _read_until_path(self, reader: str) -> Path:
+        return self._directory / f"read-until-{reader}"
 
     def recent(self, hours: float) -> str:
         """The digest of the last few hours, read or not (for the body MCP and the web page)."""
@@ -113,7 +128,7 @@ def _read_entries(path: Path) -> list[DiaryEntry]:
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             raw = json.loads(line)
-            entries.append(DiaryEntry(kind=raw["kind"], at=float(raw["at"])))
+            entries.append(DiaryEntry(kind=raw["kind"], at=float(raw["at"]), text=raw.get("text", "")))
         except (ValueError, KeyError, TypeError):
             continue  # a half-written last line after a crash
     return entries
@@ -124,10 +139,14 @@ def group_into_stretches(entries: list[DiaryEntry]) -> list[Stretch]:
 
     Kinds are merged separately, so "near" events in between do not split a
     run of "picked_up" (lifting the body also brings a hand near its screen).
+    Entries with words ("said") always stand alone.
     """
     open_stretch: dict[str, Stretch] = {}
     stretches: list[Stretch] = []
     for entry in sorted(entries, key=lambda entry: entry.at):
+        if entry.text:
+            stretches.append(Stretch(entry.kind, entry.at, entry.at, text=entry.text))
+            continue
         current = open_stretch.get(entry.kind)
         if current and entry.at - current.last_at <= SAME_STRETCH_GAP_SECS:
             current.last_at = entry.at
@@ -154,6 +173,8 @@ def _describe(stretch: Stretch, now: datetime) -> str:
     first = datetime.fromtimestamp(stretch.first_at)
     day = "" if first.date() == now.date() else f"{first:%m/%d} "
     what = DESCRIPTIONS.get(stretch.kind, stretch.kind)
+    if stretch.text:
+        return f"{day}{first:%H:%M} {what}「{stretch.text}」"
     if stretch.count == 1:
         return f"{day}{first:%H:%M} {what}"
     last = datetime.fromtimestamp(stretch.last_at)

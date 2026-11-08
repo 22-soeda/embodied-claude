@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 GIT_BASH = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
 BEAT_TIMEOUT_S = 30 * 60
 BODY_DIGEST_PATH = STATE_DIR / "body-digest.txt"
+DIARY_READER = "heartbeat"  # this session's read mark in the body diary
 
 
 class Heartbeat:
@@ -87,11 +88,11 @@ class Heartbeat:
         finally:
             self.is_running = False
             if notes_until is not None and not BODY_DIGEST_PATH.exists():
-                self._diary.mark_read(notes_until)  # the script took the notes into its prompt
+                self._diary.mark_read(DIARY_READER, notes_until)  # the script took the notes into its prompt
 
     def _write_body_digest(self) -> float | None:
         """Write the unread body notes for the script; return the time they reach up to."""
-        notes, notes_until = self._diary.unread()
+        notes, notes_until = self._diary.unread(DIARY_READER)
         if not notes:
             BODY_DIGEST_PATH.unlink(missing_ok=True)
             return None

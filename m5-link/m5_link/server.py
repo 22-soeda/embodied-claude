@@ -25,7 +25,7 @@ from aiohttp import web
 
 from .body import Body
 from .config import PACKAGE_DIR, REPO_ROOT, LinkConfig
-from .conversation import CAPTURE_DIR, Conversation
+from .conversation import CAPTURE_DIR, DIARY_READER, Conversation
 from .heartbeat import Heartbeat
 
 LOOPBACK = {"127.0.0.1", "::1"}
@@ -55,7 +55,7 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         return web.FileResponse(PACKAGE_DIR / "web" / "index.html")
 
     async def status(_: web.Request) -> web.Response:
-        unread_notes, _ = conversation.diary.unread()
+        unread_notes, _ = conversation.diary.unread(DIARY_READER)
         return web.json_response({
             "now": time.time(),
             "version": version,
@@ -81,9 +81,7 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
 
     async def say(request: web.Request) -> web.Response:
         payload = await request.json()
-        if payload.get("mood"):
-            await body.show_face(payload["mood"], 6000)
-        spoken = await conversation.speak(payload.get("text", ""))
+        spoken = await conversation.speak_unprompted(payload.get("text", ""), payload.get("mood"))
         return web.json_response({"spoken": spoken})
 
     async def face(request: web.Request) -> web.Response:

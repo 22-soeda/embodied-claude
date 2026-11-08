@@ -26,6 +26,7 @@ from .mouth import Mouth
 log = logging.getLogger(__name__)
 
 CAPTURE_DIR = REPO_ROOT / "captures"  # ignored by Git in the upstream .gitignore
+DIARY_READER = "conversation"  # this session's read mark in the body diary
 
 
 @dataclass
@@ -86,7 +87,7 @@ class Conversation:
             return HeadReply(is_silent=True)
 
         await self.body.set_thinking(True)
-        body_notes, notes_until = self.diary.unread()
+        body_notes, notes_until = self.diary.unread(DIARY_READER)
         prompt = f"[{source}] {text}"
         if body_notes:
             prompt = f"[体の記録]\n{body_notes}\n\n{prompt}"
@@ -99,7 +100,7 @@ class Conversation:
             return HeadReply(is_silent=True)
         think_seconds = time.monotonic() - started
         if body_notes:
-            self.diary.mark_read(notes_until)  # only once the head has really read them
+            self.diary.mark_read(DIARY_READER, notes_until)  # only once the head has really read them
             self._add(LogLine("system", "体の記録を添えた：" + body_notes.replace("\n", " / ")))
 
         if reply.is_silent:
@@ -124,6 +125,21 @@ class Conversation:
             return True
         pcm = await self.mouth.synthesize(text)
         return await self.body.speak(pcm, text)
+
+    async def speak_unprompted(self, text: str, mood: str | None = None) -> bool:
+        """Say something nobody asked for (the heartbeat's body MCP `say`), and write it down.
+
+        The conversation head runs in another session; the diary is how it
+        learns, at the next turn, what the body has just said to the person.
+        """
+        if mood:
+            await self.body.show_face(mood, 6000)
+        spoken = await self.speak(text)
+        if spoken:
+            self._add(LogLine("head", text, source="自分から", mood=mood))
+            self.diary.record("said", text=text)
+            log.info("the body said on its own: %s", text)
+        return spoken
 
     async def _say_trouble(self, text: str) -> None:
         self._add(LogLine("system", text))

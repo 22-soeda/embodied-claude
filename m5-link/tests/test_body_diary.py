@@ -51,19 +51,38 @@ def test_a_long_digest_keeps_the_newest_lines():
     assert lines[-1].startswith("22:00")
 
 
+def test_what_the_body_said_keeps_its_words_and_is_never_merged():
+    entries = [
+        DiaryEntry("said", at(20, 0), text="そういえば、今日はどうだった？"),
+        DiaryEntry("said", at(20, 1), text="おかえり"),
+    ]
+    assert format_digest(entries, now=EVENING).splitlines() == [
+        "20:00 自分から体の声で話しかけた「そういえば、今日はどうだった？」",
+        "20:01 自分から体の声で話しかけた「おかえり」",
+    ]
+
+
 def test_unread_notes_are_handed_over_once(tmp_path):
     diary = BodyDiary(tmp_path)
     diary.record("picked_up")
     diary.record("connected")  # m5-link's own business: not written down
-    notes, until = diary.unread()
+    notes, until = diary.unread("conversation")
     assert "持ち上げられた" in notes and "connected" not in notes
 
-    diary.mark_read(until)
-    assert diary.unread()[0] == ""
+    diary.mark_read("conversation", until)
+    assert diary.unread("conversation")[0] == ""
+
+
+def test_each_reader_keeps_its_own_mark(tmp_path):
+    diary = BodyDiary(tmp_path)
+    diary.record("said", text="おかえり")
+    _, until = diary.unread("heartbeat")
+    diary.mark_read("heartbeat", until)  # the next heartbeat read it first
+    assert "おかえり" in diary.unread("conversation")[0]
 
 
 def test_the_read_mark_never_moves_back(tmp_path):
     diary = BodyDiary(tmp_path)
-    diary.mark_read(200.0)
-    diary.mark_read(100.0)
-    assert diary.read_until() == 200.0
+    diary.mark_read("conversation", 200.0)
+    diary.mark_read("conversation", 100.0)
+    assert diary.read_until("conversation") == 200.0
