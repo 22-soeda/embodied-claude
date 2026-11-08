@@ -154,13 +154,11 @@ def day_memories(day: date) -> list[str]:
     if not MEMORY_DB_PATH.exists():
         return []
     with sqlite3.connect(f"file:{MEMORY_DB_PATH}?mode=ro", uri=True) as db:
-        rows = db.execute("SELECT timestamp, content FROM memories ORDER BY timestamp").fetchall()
-    memories = []
-    for stamp, content in rows:
-        when = _local_moment(stamp)
-        if when is not None and when.date() == day:
-            memories.append(DESIRE_RECORD.sub("", content))
-    return memories
+        rows = db.execute("SELECT timestamp, content FROM memories").fetchall()
+    # Sorted by the moment, not the stored text: "…T03:00+00:00" is noon in Tokyo.
+    that_day = sorted((when, content) for stamp, content in rows
+                      if (when := _local_moment(stamp)) is not None and when.date() == day)
+    return [DESIRE_RECORD.sub("", content) for _, content in that_day]
 
 
 def update_diary_summary() -> None:
