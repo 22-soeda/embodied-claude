@@ -35,7 +35,10 @@ def setup_logging() -> None:
         handler.setFormatter(formatter)
         logging.getLogger().addHandler(handler)
     logging.getLogger().setLevel(logging.INFO)
-    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+    # One line per HTTP request from the model download and the speech engine
+    # would bury the conversation.
+    for noisy in ("aiohttp.access", "httpx", "httpx2", "huggingface_hub", "faster_whisper"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 async def wake_up(name: str, starter) -> None:
