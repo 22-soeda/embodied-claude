@@ -327,6 +327,21 @@ fi
 # 起こさずに記録だけしてある。前回から未読の分を m5-link がこのファイルに書く。
 # プロンプトに入れて実行する回だけ、下の「実行」でファイルを消す。消えていれば
 # m5-link は既読にする。スケジュールで早期リターンした回は消さないので、次に回る。
+# --- 記憶と体から計算した欲求（m5-link が DESIRE_DIGEST_FILE を渡す） ---
+# desire-system が「最後にそれをしてから何時間か」を記憶から測り、体の状態（電池・
+# 触れられたばかりか）で増減した値のうち、強くなったものだけを m5-link が書く。
+# 上の内部衝動（タイマー）と違い、ここに出しても下がらない。実際にやるか、
+# satisfy_desire で記録したときだけ下がる。
+GROUNDED_DESIRE_SECTION=""
+if [ -n "${DESIRE_DIGEST_FILE:-}" ] && [ -s "$DESIRE_DIGEST_FILE" ]; then
+  GROUNDED_DESIRE_SECTION="
+## 欲求（記憶と体から）
+$(cat "$DESIRE_DIGEST_FILE")
+（いま強くなっている欲求。1 に近いほど強い。従うかどうかは自分の判断。満たせたら desire-system の satisfy_desire で記録する。やらなければ下がらない。）
+"
+  echo "[欲求] $(tr '\n' ' ' < "$DESIRE_DIGEST_FILE")" >> "$LOG_FILE"
+fi
+
 BODY_SECTION=""
 if [ -n "${BODY_DIGEST_FILE:-}" ] && [ -s "$BODY_DIGEST_FILE" ]; then
   BODY_SECTION="
@@ -393,7 +408,7 @@ PROMPT="自律行動タイム（Heartbeat）
 
 ${MORNING_SECTION}${ROUTINE_MODE}
 
-${DESIRE_SECTION}${BODY_SECTION}
+${DESIRE_SECTION}${GROUNDED_DESIRE_SECTION}${BODY_SECTION}
 ## 補足ルール
 - ${TIME_RULE}
 - 人に話しかける、say する、軽く促す前に \`get_social_state\` → \`evaluate_action(action_type=\"say\" または \"nudge_human\")\` を通し、許可されないなら黙るか後回しにする

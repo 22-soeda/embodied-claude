@@ -17,6 +17,10 @@ It is safe to re-run: existing files are kept, only missing pieces are added.
 4. schedule.conf: describe the v0 body in the time rules, and pin the
    heartbeat model and effort.
 5. desires.conf: add the desire to talk, which the upstream sample lacks.
+   With --with-body the desire to talk comes from desire-system instead (it
+   goes down when the companion actually talks to the body), so it is taken
+   out of desires.conf, and desire-system/.env points desire-system at the
+   body's desires (m5-link/desire-config.json) and body state.
 """
 
 from __future__ import annotations
@@ -215,6 +219,36 @@ def add_talk_desire(companion: str) -> None:
     print(f"added     desires.conf {TALK_DESIRE_NAME}")
 
 
+def remove_talk_desire() -> None:
+    path = REPO_ROOT / "desires.conf"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [line for line in lines if not line.startswith(f"{TALK_DESIRE_NAME} |")]
+    if len(kept) == len(lines):
+        return
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8", newline="\n")
+    print(f"removed   desires.conf {TALK_DESIRE_NAME} (desire-system's miss_companion takes over)")
+
+
+def configure_body_desires(companion: str) -> None:
+    """Point desire-system (its MCP server and its updater) at the body's desires.
+
+    desire-system reads desire-system/.env (python-dotenv) whichever process
+    starts it, so the head's satisfy_desire recomputes with the same desires
+    and body state as m5-link's five-minute run.
+    """
+    path = REPO_ROOT / "desire-system" / ".env"
+    wanted = {
+        "DESIRE_CONFIG_FILE": (REPO_ROOT / "m5-link" / "desire-config.json").as_posix(),
+        "DESIRE_BODY_STATE_FILE": (REPO_ROOT / "m5-link" / "state" / "body-now.json").as_posix(),
+        "COMPANION_NAME": companion,
+    }
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    lines = [line for line in lines if line.split("=", 1)[0].strip() not in wanted]
+    lines += [f"{key}={value}" for key, value in wanted.items()]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    print("updated   desire-system/.env (the body's desires)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -242,7 +276,11 @@ def main() -> None:
     configure_schedule(schedule_created, with_body)
 
     copy_if_missing("desires.sample.conf", "desires.conf")
-    add_talk_desire(args.companion)
+    if with_body:
+        remove_talk_desire()
+        configure_body_desires(args.companion)
+    else:
+        add_talk_desire(args.companion)
 
     copy_if_missing("examples/SOUL.sample.md", "SOUL.md")
     copy_if_missing("examples/TODO.sample.md", "TODO.md")

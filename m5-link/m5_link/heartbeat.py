@@ -9,7 +9,9 @@ head.py runs without hooks and never competes for it.
 Beats are aligned to the clock (:00 for 60 minutes), because the script's own
 schedule control only lets off-peak beats through at minute 00.
 
-Before each beat, the unread part of the body diary is written to
+Before each beat, the desires grown strong (see desires.py) are written to
+state/desire-digest.txt and passed as DESIRE_DIGEST_FILE, and the unread part
+of the body diary is written to
 state/body-digest.txt and passed as BODY_DIGEST_FILE. The script puts it in the
 prompt and deletes the file; only then does it count as read. A beat the
 schedule turns away leaves the file, and the notes wait for the next one.
@@ -26,19 +28,22 @@ from pathlib import Path
 
 from .body_diary import BodyDiary
 from .config import REPO_ROOT, STATE_DIR, HeartbeatConfig
+from .desires import Desires
 
 log = logging.getLogger(__name__)
 
 GIT_BASH = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
 BEAT_TIMEOUT_S = 30 * 60
 BODY_DIGEST_PATH = STATE_DIR / "body-digest.txt"
+DESIRE_DIGEST_PATH = STATE_DIR / "desire-digest.txt"
 DIARY_READER = "heartbeat"  # this session's read mark in the body diary
 
 
 class Heartbeat:
-    def __init__(self, config: HeartbeatConfig, diary: BodyDiary) -> None:
+    def __init__(self, config: HeartbeatConfig, diary: BodyDiary, desires: Desires) -> None:
         self._config = config
         self._diary = diary
+        self._desires = desires
         self.last_started: datetime | None = None
         self.last_exit_code: int | None = None
         self.is_running = False
@@ -71,11 +76,16 @@ class Heartbeat:
         self.is_running = True
         self.last_started = datetime.now()
         notes_until = self._write_body_digest()
+        await self._desires.update()  # fresh levels for this beat, not up to five minutes old
+        self._desires.write_digest(DESIRE_DIGEST_PATH)
         try:
             process = await asyncio.create_subprocess_exec(
                 str(GIT_BASH), "-l", "-c", _posix_path(script),
                 cwd=REPO_ROOT,
-                env=_heartbeat_environment() | {"BODY_DIGEST_FILE": _posix_path(BODY_DIGEST_PATH)},
+                env=_heartbeat_environment() | {
+                    "BODY_DIGEST_FILE": _posix_path(BODY_DIGEST_PATH),
+                    "DESIRE_DIGEST_FILE": _posix_path(DESIRE_DIGEST_PATH),
+                },
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
                 creationflags=0x08000000 if sys.platform == "win32" else 0,  # no console window

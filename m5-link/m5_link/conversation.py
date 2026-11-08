@@ -10,6 +10,7 @@ they go into the body diary, and the next turn carries the unread part.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import deque
@@ -19,6 +20,7 @@ from datetime import datetime
 from .body import Body, BodyEvent
 from .body_diary import BodyDiary
 from .config import REPO_ROOT
+from .desires import Desires
 from .ears import Ears
 from .head import Head, HeadReply
 from .mouth import Mouth
@@ -39,10 +41,13 @@ class LogLine:
 
 
 class Conversation:
-    def __init__(self, body: Body, ears: Ears, head: Head, mouth: Mouth, diary: BodyDiary) -> None:
+    def __init__(self, body: Body, ears: Ears, head: Head, mouth: Mouth, diary: BodyDiary,
+                 desires: Desires) -> None:
         self.body, self.ears, self.head, self.mouth = body, ears, head, mouth
         self.diary = diary
+        self.desires = desires
         self.lines: deque[LogLine] = deque(maxlen=200)
+        self._background: set[asyncio.Task] = set()
         body.on_utterance = self.hear_voice
         body.on_mitemite = self.see_picture
         body.on_event = self.feel_event
@@ -102,6 +107,9 @@ class Conversation:
         if body_notes:
             self.diary.mark_read(DIARY_READER, notes_until)  # only once the head has really read them
             self._add(LogLine("system", "体の記録を添えた：" + body_notes.replace("\n", " / ")))
+        # The person spoke to the body: that is talking together, whatever the
+        # head answers. Recorded in the background, so the reply is not held up.
+        self._in_background(self.desires.talked(source))
 
         if reply.is_silent:
             self._add(LogLine("head", "（黙っている）"))
@@ -146,6 +154,11 @@ class Conversation:
         await self.body.show_face("sad", 4000)
         await self.body.send({"t": "caption", "text": text, "ms": 6000})
         await self.body.set_thinking(False)
+
+    def _in_background(self, coroutine) -> None:
+        task = asyncio.create_task(coroutine)
+        self._background.add(task)  # keep a reference until it finishes
+        task.add_done_callback(self._background.discard)
 
     def _add(self, line: LogLine) -> None:
         self.lines.append(line)

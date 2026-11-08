@@ -17,9 +17,11 @@ cronで5分ごとに実行:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
@@ -205,6 +207,131 @@ DESIRE_CONFIGS: dict[str, DesireConfig] = {
     ),
 }
 
+# ──────────────────────────────────────────────
+# 設定ファイルによる差し替え（体ごとの欲求）
+# ──────────────────────────────────────────────
+#
+# DESIRE_CONFIG_FILE に JSON を置くと、上の既定の欲求を丸ごと差し替える。体に
+# よってできることが違う（首振りカメラなら外を見られるが、M5Stack の体は見られ
+# ない）ので、こなせない欲求を外し、満たす言葉をその体の言い方に合わせるため。
+# PetitOnes の desire_config.json と同じ考え方。
+#
+#   {"desires": {"miss_companion": {"label": "{companion}と話したい",
+#                                   "satisfaction_hours": 3, "set_point": 0.3,
+#                                   "keywords": ["{companion}と話した", ...]}},
+#    "body_effects": [ ... 下の「体の状態の効き」 ... ]}
+#
+# 欲求の名前は既定と同じものを使う。individual-kernel の allostasis と
+# interaction-orchestrator が名前で読むので。{companion} {self} {pronoun} は
+# COMPANION_NAME / SELF_NAME / SELF_PRONOUN に置き換わる。読めないファイルは
+# 標準エラーに一行出して既定の欲求に戻る（体の感覚ひとつで止まらないように）。
+
+
+def _fill_names(text: str) -> str:
+    return (
+        text.replace("{companion}", COMPANION_NAME)
+        .replace("{self}", SELF_NAME)
+        .replace("{pronoun}", SELF_PRONOUN)
+    )
+
+
+def load_desire_file(path: Path) -> tuple[dict[str, DesireConfig], list[dict[str, Any]]]:
+    """Read a desire config file: (desires by name, body effects)."""
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    configs = {
+        name: DesireConfig(
+            satisfaction_hours=float(spec["satisfaction_hours"]),
+            set_point=float(spec.get("set_point", 0.3)),
+            keywords=[_fill_names(keyword) for keyword in spec.get("keywords", [])],
+            label=_fill_names(spec.get("label", name)),
+        )
+        for name, spec in raw.get("desires", {}).items()
+    }
+    if not configs:
+        raise ValueError("no desires in the file")
+    return configs, list(raw.get("body_effects", []))
+
+
+BODY_EFFECTS: list[dict[str, Any]] = []
+DESIRE_CONFIG_FILE = os.getenv("DESIRE_CONFIG_FILE", "").strip()
+if DESIRE_CONFIG_FILE:
+    try:
+        DESIRE_CONFIGS, BODY_EFFECTS = load_desire_file(Path(DESIRE_CONFIG_FILE).expanduser())
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(
+            f"[desire-updater] DESIRE_CONFIG_FILE={DESIRE_CONFIG_FILE} を読めなかったので"
+            f"既定の欲求を使う: {error}",
+            file=sys.stderr,
+        )
+
+
+# ──────────────────────────────────────────────
+# 体の状態の効き（PetitOnes の sensor_effects と同じ考え方）
+# ──────────────────────────────────────────────
+#
+# 体を持つ側（m5-link など）が DESIRE_BODY_STATE_FILE に今の体の状態を書く:
+#   {"updated_at": <unix 秒>, "battery": 76, "charging": true,
+#    "last_contact_at": <最後に触れられた unix 秒 | null>}
+# 設定ファイルの body_effects がそれを見て、記憶から計算した欲求レベルを増減する:
+#   {"when": "battery_low", "below": 20, "effects": {"*": {"multiply": 0.5}}}
+#   {"when": "contact_within", "minutes": 20, "effects": {"miss_companion": {"multiply": 0.5}}}
+# 古い状態は使わない。書く側が止まっていれば、体はもう感じていないので。
+BODY_STATE_MAX_AGE_SECS = 15 * 60
+
+
+def load_body_state(now_ts: float, path: str | None = None) -> dict[str, Any] | None:
+    """The body's state, or None when there is none or it is stale."""
+    path = path if path is not None else os.getenv("DESIRE_BODY_STATE_FILE", "").strip()
+    if not path:
+        return None
+    try:
+        body = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    age_secs = now_ts - float(body.get("updated_at", 0))
+    return body if age_secs <= BODY_STATE_MAX_AGE_SECS else None
+
+
+def body_effect_applies(effect: dict[str, Any], body: dict[str, Any], now_ts: float) -> bool:
+    when = effect.get("when")
+    if when == "battery_low":
+        battery = body.get("battery")
+        below = float(effect.get("below", 20))
+        return battery is not None and 0 <= float(battery) < below and not body.get("charging")
+    if when == "contact_within":
+        last_contact = body.get("last_contact_at")
+        window_secs = float(effect.get("minutes", 20)) * 60
+        return last_contact is not None and now_ts - float(last_contact) <= window_secs
+    return False
+
+
+def apply_body_effects(
+    levels: dict[str, float],
+    body: dict[str, Any] | None,
+    effects: list[dict[str, Any]],
+    now_ts: float,
+) -> dict[str, float]:
+    """Raise or lower desire levels by what the body is going through. "*" means every desire."""
+    adjusted = dict(levels)
+    if not body:
+        return adjusted
+    for effect in effects:
+        if not body_effect_applies(effect, body, now_ts):
+            continue
+        for target, change in effect.get("effects", {}).items():
+            names = list(adjusted) if target == "*" else [target] if target in adjusted else []
+            for name in names:
+                value = adjusted[name]
+                if "multiply" in change:
+                    value *= float(change["multiply"])
+                if "add" in change:
+                    value += float(change["add"])
+                adjusted[name] = round(max(0.0, min(1.0, value)), 3)
+    return adjusted
+
+
 # 後方互換: 旧モジュールが参照していた変数
 DESIRE_KEYWORDS: dict[str, list[str]] = {
     name: cfg.keywords for name, cfg in DESIRE_CONFIGS.items()
@@ -325,16 +452,22 @@ def calculate_desire_level(
 def compute_desires(
     adapter_or_collection: Any,
     now: datetime | None = None,
+    body: dict[str, Any] | None = None,
 ) -> DesireState:
     """全欲求レベルを計算してDesireStateを返す。
 
     ``adapter_or_collection`` accepts either a :class:`DesireMemoryAdapter`
     (preferred) or a legacy ChromaDB collection for backwards compatibility
     with pre-v0.3 callers. A Chroma collection is wrapped transparently.
+
+    ``body`` is the body's state for BODY_EFFECTS; when omitted it is read from
+    DESIRE_BODY_STATE_FILE (if any), so every caller - the updater, and the MCP
+    server recomputing after satisfy_desire - sees the same body.
     """
 
     if now is None:
         now = datetime.now(timezone.utc)
+    now_ts = (now if now.tzinfo else now.replace(tzinfo=timezone.utc)).timestamp()
 
     adapter = _coerce_adapter(adapter_or_collection)
 
@@ -346,6 +479,11 @@ def compute_desires(
         level = calculate_desire_level(last_ts, cfg.satisfaction_hours, now)
         desires[desire_name] = round(level, 3)
 
+    if BODY_EFFECTS:
+        body = body if body is not None else load_body_state(now_ts)
+        desires = apply_body_effects(desires, body, BODY_EFFECTS, now_ts)
+
+    for desire_name, level in desires.items():
         # アロスタシス: 時間帯でセットポイントを調整
         adjusted_sp = get_allostatic_set_point(desire_name, now)
         discomforts[desire_name] = round(calculate_discomfort(level, adjusted_sp), 3)
@@ -436,10 +574,38 @@ def load_desires(path: Path = DESIRES_PATH) -> DesireState | None:
         return None
 
 
-def main() -> None:
-    """メインエントリポイント（cronから呼ばれる）。"""
+def record_satisfaction(adapter: Any, desire_name: str, summary: str = "") -> str:
+    """Write that a desire was met into memory, in words the next computation finds.
+
+    The record starts with the desire's first keyword ("添田と話した。…"),
+    which is what makes compute_desires see it.
+    """
+    marker = DESIRE_CONFIGS[desire_name].keywords[0]
+    return _coerce_adapter(adapter).record_satisfaction(
+        desire_name=desire_name,
+        summary=f"{marker}。{summary or marker}",
+        ts=datetime.now(timezone.utc),
+        metadata={"outcome": "satisfied"},
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
+    """メインエントリポイント（cronから呼ばれる）。
+
+    --satisfy NAME [--summary TEXT] records the desire as met first, for
+    callers outside the MCP server (m5-link counts a conversation through the
+    body as talking with the companion).
+    """
+    parser = argparse.ArgumentParser(description="recompute desires.json from memory")
+    parser.add_argument("--satisfy", metavar="DESIRE", help="record this desire as met first")
+    parser.add_argument("--summary", default="", help="what was done, for the memory record")
+    args = parser.parse_args(argv)
 
     adapter = make_default_adapter()
+    if args.satisfy:
+        if args.satisfy not in DESIRE_CONFIGS:
+            parser.error(f"unknown desire {args.satisfy!r}; known: {', '.join(DESIRE_CONFIGS)}")
+        record_satisfaction(adapter, args.satisfy, args.summary)
     state = compute_desires(adapter)
     save_desires(state)
     print(

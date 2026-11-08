@@ -104,6 +104,12 @@ class BodyDiary:
     def _read_until_path(self, reader: str) -> Path:
         return self._directory / f"read-until-{reader}"
 
+    def last_event_at(self, kinds: set[str], within_hours: float = 24) -> float | None:
+        """When one of these kinds of event last happened, or None."""
+        entries = self._entries_since(time.time() - within_hours * 3600)
+        times = [entry.at for entry in entries if entry.kind in kinds]
+        return max(times) if times else None
+
     def recent(self, hours: float) -> str:
         """The digest of the last few hours, read or not (for the body MCP and the web page)."""
         entries = self._entries_since(time.time() - hours * 3600)

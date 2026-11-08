@@ -18,6 +18,7 @@ from aiohttp import web
 from .body import Body
 from .body_diary import BodyDiary
 from .config import REPO_ROOT, STATE_DIR, load_config
+from .desires import Desires
 from .conversation import Conversation
 from .ears import Ears
 from .head import Head
@@ -87,11 +88,12 @@ async def main() -> None:
 
     body = Body()
     diary = BodyDiary(STATE_DIR / "body-diary")
+    desires = Desires(body, diary, config.head.companion_name)
     ears = Ears(config.ears)
     mouth = Mouth(config.mouth)
     head = Head(config.head)
-    heartbeat = Heartbeat(config.heartbeat, diary)
-    conversation = Conversation(body, ears, head, mouth, diary)
+    heartbeat = Heartbeat(config.heartbeat, diary, desires)
+    conversation = Conversation(body, ears, head, mouth, diary, desires)
 
     runner = web.AppRunner(build_app(config, body, conversation, heartbeat, version))
     await runner.setup()
@@ -107,6 +109,7 @@ async def main() -> None:
         asyncio.create_task(wake_up("speech recognition", ears.load)),
         asyncio.create_task(keep_head(head)),
         asyncio.create_task(heartbeat.run_forever()),
+        asyncio.create_task(desires.run_forever()),
     ]
     try:
         await asyncio.gather(*background)

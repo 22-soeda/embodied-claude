@@ -62,6 +62,7 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
             "body": body.summary(),
             "head": conversation.head.summary(),
             "body_notes_unread": unread_notes,
+            "desires": conversation.desires.levels(),
             "ears": {"device": conversation.ears.device, "model": conversation.ears.model_name},
             "mouth": {"ready": conversation.mouth.is_ready, "voice": conversation.mouth.speaker_name},
             "heartbeat": heartbeat.summary(),

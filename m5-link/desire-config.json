@@ -1,0 +1,46 @@
+{
+  "about": "Desires of the M5Stack CoreS3 body, read by desire-system through DESIRE_CONFIG_FILE (see desire-system/desire_updater.py). Names are desire-system's own, because individual-kernel and interaction-orchestrator read them. {companion} becomes COMPANION_NAME. Left out: look_outside (the body cannot see out of a window), browse_curiosity (the heartbeat has no web search) and identity_coherence (its set point of 0.9 makes it most uncomfortable right after a recall).",
+  "desires": {
+    "miss_companion": {
+      "label": "{companion}と話したい",
+      "satisfaction_hours": 3.0,
+      "set_point": 0.3,
+      "keywords": [
+        "{companion}と話した",
+        "{companion}が話しかけてくれた",
+        "{companion}に話しかけた",
+        "{companion}に伝えた",
+        "{companion}の顔を見た",
+        "{companion}がいた"
+      ],
+      "why": "m5-link records a conversation through the body as the first keyword, so talking lowers it"
+    },
+    "observe_room": {
+      "label": "部屋を見たい",
+      "satisfaction_hours": 2.0,
+      "set_point": 0.2,
+      "keywords": ["部屋を見た", "部屋を観察した", "カメラで部屋を", "体のカメラで見た", "look_around"],
+      "why": "the body's camera (body MCP see); two hours, not the ten minutes of a pan-tilt camera"
+    },
+    "cognitive_load": {
+      "label": "考えごとをしたい",
+      "satisfaction_hours": 3.0,
+      "set_point": 0.3,
+      "keywords": ["考えた", "振り返った", "まとめた", "書き残した", "読んだ"]
+    }
+  },
+  "body_effects": [
+    {
+      "when": "battery_low",
+      "below": 20,
+      "effects": {"*": {"multiply": 0.5}},
+      "why": "with little battery left, wanting anything weakens (PetitOnes' example)"
+    },
+    {
+      "when": "contact_within",
+      "minutes": 20,
+      "effects": {"miss_companion": {"multiply": 0.5}},
+      "why": "being picked up or touched just now half meets wanting to be with someone"
+    }
+  ]
+}
