@@ -44,6 +44,11 @@ engine_path = "~/AivisSpeech-Engine/Windows-x64/run.exe"  # started if not runni
 speaker = 0        # style id; 0 = the first style the engine lists
 speed = 1.05
 
+[mouth.readings]
+# Words the engine reads wrong, put into its user dictionary at start.
+# 表記 = "カタカナ" (flat accent), or 表記 = ["カタカナ", where the pitch falls]
+# "東海林" = "ショウジ"
+
 [heartbeat]
 enabled = true     # run autonomous-action.sh on a schedule, instead of Task Scheduler
 interval_minutes = 60
@@ -79,6 +84,7 @@ class MouthConfig:
     engine_path: str = ""
     speaker: int = 0
     speed: float = 1.0
+    readings: dict = field(default_factory=dict)  # surface -> "カタカナ" or ["カタカナ", accent]
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,11 @@
 The engine is asked for 16 kHz mono directly (outputSamplingRate), which is
 what the body plays, so no resampling happens here. If the engine is not
 running and engine_path is set, it is started in the background.
+
+Words the engine reads wrong go into its user dictionary at start, from
+[mouth.readings] in m5-link.toml. A name read wrong is the first thing a
+companion notices; on 2026-11-08 添田 came out as ソエタ. The head can learn
+to write the name in kana, but only while it remembers to.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import io
 import logging
 import subprocess
 import sys
+import unicodedata
 import wave
 from pathlib import Path
 
@@ -41,6 +47,7 @@ class Mouth:
         if not await self._engine_answers():
             self._launch_engine()
             await self._wait_for_engine()
+        await self._teach_readings()
         await self._choose_speaker()
 
     async def close(self) -> None:
@@ -93,6 +100,33 @@ class Mouth:
             await asyncio.sleep(1)
         raise RuntimeError("the speech engine did not answer in time")
 
+    async def _teach_readings(self) -> None:
+        """Make the engine's user dictionary agree with [mouth.readings]: add or correct each word."""
+        if not self._config.readings:
+            return
+        async with self._session.get("/user_dict") as response:
+            response.raise_for_status()
+            known_words = await response.json()  # word uuid -> word
+        uuid_by_surface = {_same_width(word["surface"]): (uuid, word) for uuid, word in known_words.items()}
+
+        for surface, reading in self._config.readings.items():
+            pronunciation, accent_type = parse_reading(reading)
+            params = {"surface": surface, "pronunciation": pronunciation,
+                      "accent_type": accent_type, "word_type": "PROPER_NOUN"}
+            uuid, word = uuid_by_surface.get(_same_width(surface), (None, None))
+            if word and word.get("pronunciation") == pronunciation and word.get("accent_type") == accent_type:
+                continue
+            if uuid:
+                request = self._session.put(f"/user_dict_word/{uuid}", params=params)
+            else:
+                request = self._session.post("/user_dict_word", params=params)
+            async with request as response:
+                if response.status >= 400:
+                    log.warning("the speech engine did not take the reading %s -> %s: %s",
+                                surface, pronunciation, await response.text())
+                    continue
+            log.info("taught the speech engine to read %s as %s", surface, pronunciation)
+
     async def _choose_speaker(self) -> None:
         async with self._session.get("/speakers") as response:
             response.raise_for_status()
@@ -106,6 +140,23 @@ class Mouth:
         self.speaker_id = chosen[1]["id"]
         self.speaker_name = f"{chosen[0]} ({chosen[1]['name']})"
         log.info("voice: %s, style id %s", self.speaker_name, self.speaker_id)
+
+
+def parse_reading(reading: str | list) -> tuple[str, int]:
+    """'ソエダ' -> ('ソエダ', 0): flat accent unless given, as in ['ハシ', 1].
+
+    The accent is where the pitch falls, counted in morae; 0 means it never
+    falls, which suits most family names (マエダ, ヨシダ).
+    """
+    if isinstance(reading, str):
+        return reading, 0
+    pronunciation, accent_type = reading
+    return str(pronunciation), int(accent_type)
+
+
+def _same_width(text: str) -> str:
+    """The engine stores surfaces in full width; compare both sides the same way."""
+    return unicodedata.normalize("NFKC", text)
 
 
 def _pcm_from_wav(wav_bytes: bytes) -> bytes:

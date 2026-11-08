@@ -31,6 +31,8 @@ uv run --no-sync python scripts/windows/configure_v0.py --companion 添田 --wit
 
 AivisSpeech Engine を `~\AivisSpeech-Engine\Windows-x64\run.exe` に置く。m5-link が動いていなければ起動する。場所が違うときは `m5-link.toml` の `[mouth] engine_path`。
 
+声が読み違える言葉（とくに名前）は、`m5-link.toml` の `[mouth.readings]` に `"東海林" = "ショウジ"` の形で書く。m5-link が起動のたびにエンジンのユーザー辞書へ入れる。アクセントは平板になる。下がる位置を指定するときは `"橋" = ["ハシ", 1]`。
+
 ## m5-link を動かす
 
 ```powershell
