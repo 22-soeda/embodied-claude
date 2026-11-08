@@ -3,6 +3,9 @@
     voice from the body -> ears -> head -> mouth -> body speaks
     text from the web page ----------^
     "みてみて" picture ----(saved)---^
+
+Other body events (picked up, shaken, someone near) do not start a turn:
+they go into the body diary, and the next turn carries the unread part.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
 from .body import Body, BodyEvent
+from .body_diary import BodyDiary
 from .config import REPO_ROOT
 from .ears import Ears
 from .head import Head, HeadReply
@@ -22,10 +26,6 @@ from .mouth import Mouth
 log = logging.getLogger(__name__)
 
 CAPTURE_DIR = REPO_ROOT / "captures"  # ignored by Git in the upstream .gitignore
-SPOKEN_EVENTS = {"picked_up", "shaken"}  # body events worth a word from the head
-# The body makes its surprised face by itself every time; the head adds a word
-# at most this often, or carrying the body around turns into chatter.
-EVENT_WORD_GAP_SECS = 180
 
 
 @dataclass
@@ -38,10 +38,10 @@ class LogLine:
 
 
 class Conversation:
-    def __init__(self, body: Body, ears: Ears, head: Head, mouth: Mouth) -> None:
+    def __init__(self, body: Body, ears: Ears, head: Head, mouth: Mouth, diary: BodyDiary) -> None:
         self.body, self.ears, self.head, self.mouth = body, ears, head, mouth
+        self.diary = diary
         self.lines: deque[LogLine] = deque(maxlen=200)
-        self._last_event_word_at = -EVENT_WORD_GAP_SECS  # monotonic seconds
         body.on_utterance = self.hear_voice
         body.on_mitemite = self.see_picture
         body.on_event = self.feel_event
@@ -71,13 +71,10 @@ class Conversation:
         await self.respond(f"カメラで見せてくれた。画像: {relative}", source="みてみて", log_input=False)
 
     async def feel_event(self, event: BodyEvent) -> None:
-        if event.kind not in SPOKEN_EVENTS or self.head.is_thinking or self.body.is_speaking:
-            return
-        if time.monotonic() - self._last_event_word_at < EVENT_WORD_GAP_SECS:
-            return
-        self._last_event_word_at = time.monotonic()
-        descriptions = {"picked_up": "体が持ち上げられた", "shaken": "体が揺さぶられた"}
-        await self.respond(descriptions[event.kind], source="体", log_input=False)
+        # The body has already reacted by itself (a surprised face). The head
+        # hears about it at its next turn, so carrying the body around does
+        # not turn into a remark per lift.
+        self.diary.record(event.kind, event.at)
 
     # ------------------------------------------------------------ the turn
 
@@ -89,14 +86,21 @@ class Conversation:
             return HeadReply(is_silent=True)
 
         await self.body.set_thinking(True)
+        body_notes, notes_until = self.diary.unread()
+        prompt = f"[{source}] {text}"
+        if body_notes:
+            prompt = f"[体の記録]\n{body_notes}\n\n{prompt}"
         started = time.monotonic()
         try:
-            reply = await self.head.reply(f"[{source}] {text}")
+            reply = await self.head.reply(prompt)
         except Exception as error:  # noqa: BLE001
             log.exception("the head failed to answer")
             await self._say_trouble(f"頭がうまく働かなかった（{error}）")
             return HeadReply(is_silent=True)
         think_seconds = time.monotonic() - started
+        if body_notes:
+            self.diary.mark_read(notes_until)  # only once the head has really read them
+            self._add(LogLine("system", "体の記録を添えた：" + body_notes.replace("\n", " / ")))
 
         if reply.is_silent:
             self._add(LogLine("head", "（黙っている）"))
@@ -104,7 +108,7 @@ class Conversation:
             return reply
 
         self._add(LogLine("head", reply.text, mood=reply.mood))
-        log.info("head answered in %.1f s (cost %s): %s", think_seconds, reply.cost_usd, reply.text)
+        log.info("head answered in %.1f s (read %s tokens): %s", think_seconds, reply.tokens_read, reply.text)
         if reply.mood:
             await self.body.show_face(reply.mood, 6000)
         await self.speak(reply.text)

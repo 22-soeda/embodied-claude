@@ -10,12 +10,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import subprocess
 from logging.handlers import RotatingFileHandler
 
 from aiohttp import web
 
 from .body import Body
-from .config import STATE_DIR, load_config
+from .body_diary import BodyDiary
+from .config import REPO_ROOT, STATE_DIR, load_config
 from .conversation import Conversation
 from .ears import Ears
 from .head import Head
@@ -48,6 +50,26 @@ async def wake_up(name: str, starter) -> None:
         log.exception("%s failed to start", name)
 
 
+async def keep_head(head: Head) -> None:
+    await wake_up("head", head.start)
+    await head.run_day_turnover()
+
+
+def code_version() -> str:
+    """'9f3c2a1', or '9f3c2a1+changes' when tracked files differ from that commit."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(REPO_ROOT), *args],
+                              capture_output=True, text=True, timeout=10).stdout.strip()
+    try:
+        commit = git("rev-parse", "--short", "HEAD")
+        changed = git("status", "--porcelain", "--untracked-files=no")
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    if not commit:
+        return "unknown"
+    return f"{commit}+changes" if changed else commit
+
+
 def lan_address() -> str:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         try:
@@ -60,15 +82,18 @@ def lan_address() -> str:
 async def main() -> None:
     setup_logging()
     config = load_config()
+    version = code_version()
+    log.info("m5-link starting at %s", version)
 
     body = Body()
+    diary = BodyDiary(STATE_DIR / "body-diary")
     ears = Ears(config.ears)
     mouth = Mouth(config.mouth)
     head = Head(config.head)
-    heartbeat = Heartbeat(config.heartbeat)
-    conversation = Conversation(body, ears, head, mouth)
+    heartbeat = Heartbeat(config.heartbeat, diary)
+    conversation = Conversation(body, ears, head, mouth, diary)
 
-    runner = web.AppRunner(build_app(config, body, conversation, heartbeat))
+    runner = web.AppRunner(build_app(config, body, conversation, heartbeat, version))
     await runner.setup()
     await web.TCPSite(runner, config.server.host, config.server.port).start()
 
@@ -80,7 +105,7 @@ async def main() -> None:
     background = [
         asyncio.create_task(wake_up("speech engine", mouth.start)),
         asyncio.create_task(wake_up("speech recognition", ears.load)),
-        asyncio.create_task(wake_up("head", head.start)),
+        asyncio.create_task(keep_head(head)),
         asyncio.create_task(heartbeat.run_forever()),
     ]
     try:

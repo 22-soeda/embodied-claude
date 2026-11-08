@@ -3,6 +3,7 @@
     GET  /body          WebSocket for the M5 body (?token=...)
     GET  /              the web page (watch the body, type to talk)
     GET  /api/status    everything the page and the body MCP need to know
+    GET  /api/body-diary?hours=24   what happened to the body, as the head reads it
     POST /api/chat      {"text"}: a conversation turn, as if typed to the body
     POST /api/say       {"text", "mood"?}: speak through the body, no turn
     POST /api/face      {"mood", "ms"?}
@@ -30,7 +31,8 @@ from .heartbeat import Heartbeat
 LOOPBACK = {"127.0.0.1", "::1"}
 
 
-def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartbeat: Heartbeat) -> web.Application:
+def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartbeat: Heartbeat,
+              version: str) -> web.Application:
     token = config.server.token
 
     def has_token(request: web.Request) -> bool:
@@ -53,20 +55,22 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         return web.FileResponse(PACKAGE_DIR / "web" / "index.html")
 
     async def status(_: web.Request) -> web.Response:
+        unread_notes, _ = conversation.diary.unread()
         return web.json_response({
             "now": time.time(),
+            "version": version,
             "body": body.summary(),
-            "head": {
-                "ready": conversation.head.is_ready,
-                "thinking": conversation.head.is_thinking,
-                "session_id": conversation.head.session_id,
-                "model": config.head.model,
-            },
+            "head": conversation.head.summary(),
+            "body_notes_unread": unread_notes,
             "ears": {"device": conversation.ears.device, "model": conversation.ears.model_name},
             "mouth": {"ready": conversation.mouth.is_ready, "voice": conversation.mouth.speaker_name},
             "heartbeat": heartbeat.summary(),
             "conversation": conversation.recent_lines(),
         })
+
+    async def body_diary(request: web.Request) -> web.Response:
+        hours = float(request.query.get("hours", "24"))
+        return web.json_response({"hours": hours, "text": conversation.diary.recent(hours)})
 
     async def chat(request: web.Request) -> web.Response:
         text = (await request.json()).get("text", "").strip()
@@ -119,6 +123,7 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         web.get("/body", body_socket),
         web.get("/", page),
         web.get("/api/status", status),
+        web.get("/api/body-diary", body_diary),
         web.post("/api/chat", chat),
         web.post("/api/say", say),
         web.post("/api/face", face),

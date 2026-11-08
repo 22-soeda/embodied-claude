@@ -8,6 +8,11 @@ head.py runs without hooks and never competes for it.
 
 Beats are aligned to the clock (:00 for 60 minutes), because the script's own
 schedule control only lets off-peak beats through at minute 00.
+
+Before each beat, the unread part of the body diary is written to
+state/body-digest.txt and passed as BODY_DIGEST_FILE. The script puts it in the
+prompt and deletes the file; only then does it count as read. A beat the
+schedule turns away leaves the file, and the notes wait for the next one.
 """
 
 from __future__ import annotations
@@ -19,17 +24,20 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .config import REPO_ROOT, HeartbeatConfig
+from .body_diary import BodyDiary
+from .config import REPO_ROOT, STATE_DIR, HeartbeatConfig
 
 log = logging.getLogger(__name__)
 
 GIT_BASH = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
 BEAT_TIMEOUT_S = 30 * 60
+BODY_DIGEST_PATH = STATE_DIR / "body-digest.txt"
 
 
 class Heartbeat:
-    def __init__(self, config: HeartbeatConfig) -> None:
+    def __init__(self, config: HeartbeatConfig, diary: BodyDiary) -> None:
         self._config = config
+        self._diary = diary
         self.last_started: datetime | None = None
         self.last_exit_code: int | None = None
         self.is_running = False
@@ -61,11 +69,12 @@ class Heartbeat:
 
         self.is_running = True
         self.last_started = datetime.now()
+        notes_until = self._write_body_digest()
         try:
             process = await asyncio.create_subprocess_exec(
                 str(GIT_BASH), "-l", "-c", _posix_path(script),
                 cwd=REPO_ROOT,
-                env=_heartbeat_environment(),
+                env=_heartbeat_environment() | {"BODY_DIGEST_FILE": _posix_path(BODY_DIGEST_PATH)},
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
                 creationflags=0x08000000 if sys.platform == "win32" else 0,  # no console window
@@ -77,6 +86,18 @@ class Heartbeat:
             process.kill()
         finally:
             self.is_running = False
+            if notes_until is not None and not BODY_DIGEST_PATH.exists():
+                self._diary.mark_read(notes_until)  # the script took the notes into its prompt
+
+    def _write_body_digest(self) -> float | None:
+        """Write the unread body notes for the script; return the time they reach up to."""
+        notes, notes_until = self._diary.unread()
+        if not notes:
+            BODY_DIGEST_PATH.unlink(missing_ok=True)
+            return None
+        STATE_DIR.mkdir(exist_ok=True)
+        BODY_DIGEST_PATH.write_text(notes + "\n", encoding="utf-8")
+        return notes_until
 
     def summary(self) -> dict:
         return {

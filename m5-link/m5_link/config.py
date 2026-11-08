@@ -29,6 +29,8 @@ token = "{token}"  # the body sends it as ?token=; also unlocks the web page off
 model = "sonnet"   # conversation turns; short and fast matters more than depth
 effort = "low"
 companion_name = "添田"
+day_starts_at = 4  # the conversation session is closed and started afresh at this hour; memory carries over
+max_turns = 6      # model calls allowed for one reply, tool calls included
 
 [ears]
 # "auto" = large-v3-turbo on an NVIDIA GPU, small on the CPU otherwise.
@@ -60,6 +62,8 @@ class HeadConfig:
     model: str = "sonnet"
     effort: str = "low"
     companion_name: str = "あなた"
+    day_starts_at: int = 4
+    max_turns: int = 6
 
 
 @dataclass(frozen=True)

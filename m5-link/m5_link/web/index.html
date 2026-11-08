@@ -73,7 +73,13 @@
       <img id="photo" alt="" hidden>
     </section>
     <section>
+      <h2>頭</h2>
+      <dl id="head"></dl>
+    </section>
+    <section>
       <h2>最近の出来事</h2>
+      <p class="meta">頭がまだ読んでいない体の記録</p>
+      <pre id="notes" class="meta"></pre>
       <ul id="events"></ul>
     </section>
     <section>
@@ -142,6 +148,8 @@ async function refresh() {
          status.head.ready ? "ok" : "warn"),
     pill(`耳：${status.ears.model || "準備中"} ${status.ears.device}`, status.ears.model ? "ok" : "warn"),
     pill(`口：${status.mouth.ready ? status.mouth.voice : "準備中"}`, status.mouth.ready ? "ok" : "warn"),
+    ...(status.head.mcp || []).filter(s => s.status !== "connected")
+      .map(s => pill(`MCP ${s.name}：${s.status}`, "bad")),
   );
   fillList(document.getElementById("body"), [
     ["名前", body.hello.name], ["ファーム", body.hello.fw],
@@ -150,6 +158,15 @@ async function refresh() {
     ["近く", state.near === undefined ? null : (state.near ? "何かいる" : "いない")],
     ["明るさ", state.light], ["話し中", body.speaking ? "はい" : "いいえ"],
   ]);
+  const head = status.head;
+  const mcpText = (head.mcp || []).map(s => s.status === "connected" ? `${s.name} ${s.tools}` : `${s.name} ✕ ${s.status}`).join("、");
+  fillList(document.getElementById("head"), [
+    ["版", status.version], ["モデル", head.model],
+    ["今日のセッション", head.day ? `${head.day}（返事 ${head.replies} 回）` : null],
+    ["文脈", head.context_tokens != null ? `${Math.round(head.context_tokens / 1000)}k トークン（起動時）` : null],
+    ["MCP", mcpText || null],
+  ]);
+  document.getElementById("notes").textContent = status.body_notes_unread || "（なし）";
   document.getElementById("events").replaceChildren(...body.recent_events.slice().reverse().map(e => {
     const li = document.createElement("li"); li.textContent = `${timeOf(e.at)} ${e.kind}`; return li;
   }));

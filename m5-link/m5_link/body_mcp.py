@@ -97,14 +97,18 @@ def get_body_state() -> str:
 
 
 @mcp.tool()
-def list_body_events(limit: int = 20) -> str:
-    """Recent things that happened to the body, newest last: touches, being picked up, connections."""
-    status = _call("GET", "/api/status")
-    if status.get("error"):
-        return status["error"]
-    events = status["body"]["recent_events"][-max(limit, 1):]
-    lines = [f"{datetime.fromtimestamp(e['at']):%m-%d %H:%M:%S} {e['kind']}" for e in events]
-    return "\n".join(lines) or "no events yet"
+def list_body_events(hours: float = 24) -> str:
+    """What happened to the body in the last few hours, oldest first.
+
+    Being picked up, shaken, someone coming near, the battery running low.
+    Repeats close together are one line ("持ち上げられた（3 回）"). The
+    heartbeat prompt already includes the part not yet seen; use this to
+    look further back.
+    """
+    result = _call("GET", f"/api/body-diary?hours={hours}")
+    if result.get("error"):
+        return result["error"]
+    return result["text"] or f"nothing happened to the body in the last {hours:g} hours"
 
 
 if __name__ == "__main__":

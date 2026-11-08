@@ -315,6 +315,20 @@ if [ -n "$INTEROCEPTION_TEXT" ]; then
 $INTEROCEPTION_TEXT"
 fi
 
+# --- 体の記録（M5 の体があるときだけ。m5-link が BODY_DIGEST_FILE を渡す） ---
+# 体が持ち上げられた・揺さぶられた・近くに誰か来た、などの出来事は、その場では頭を
+# 起こさずに記録だけしてある。前回から未読の分を m5-link がこのファイルに書く。
+# プロンプトに入れて実行する回だけ、下の「実行」でファイルを消す。消えていれば
+# m5-link は既読にする。スケジュールで早期リターンした回は消さないので、次に回る。
+BODY_SECTION=""
+if [ -n "${BODY_DIGEST_FILE:-}" ] && [ -s "$BODY_DIGEST_FILE" ]; then
+  BODY_SECTION="
+## 体の記録（前回目覚めてから）
+$(cat "$BODY_DIGEST_FILE")
+（体に起きたことの記録。気になることがあれば触れてよい。）
+"
+fi
+
 MORNING_SECTION=""
 if [ "$IS_FIRST_SESSION_TODAY" = true ]; then
   # consciousness-mcp / individual-kernel-mcp の sleep_consolidate が
@@ -372,7 +386,7 @@ PROMPT="自律行動タイム（Heartbeat）
 
 ${MORNING_SECTION}${ROUTINE_MODE}
 
-${DESIRE_SECTION}
+${DESIRE_SECTION}${BODY_SECTION}
 ## 補足ルール
 - ${TIME_RULE}
 - 人に話しかける、say する、軽く促す前に \`get_social_state\` → \`evaluate_action(action_type=\"say\" または \"nudge_human\")\` を通し、許可されないなら黙るか後回しにする
@@ -433,6 +447,10 @@ if [ -n "$TEST_PROMPT_STRING" ]; then
   PROMPT="$TEST_PROMPT_STRING"
 elif [ -n "$TEST_PROMPT_FILE" ]; then
   PROMPT=$(cat "$TEST_PROMPT_FILE")
+elif [ -n "$BODY_SECTION" ] && [ "$DRY_RUN" = false ]; then
+  # 体の記録はこの回のプロンプトに入った。消して m5-link に既読を知らせる
+  echo "[体の記録] $(grep -c . "$BODY_DIGEST_FILE") 行を渡した" >> "$LOG_FILE"
+  rm -f "$BODY_DIGEST_FILE"
 fi
 
 # --- 実行 ---
