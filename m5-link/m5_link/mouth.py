@@ -29,6 +29,10 @@ log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 ENGINE_START_TIMEOUT_S = 120
+# The dictionary's top priority. Tried on 2026-11-08 with 添田 -> ソエダ: at 5
+# (the default) nothing changed, at 8 "添田。" was right but "添田さん" still
+# came out as ソエタサン, at 10 both were right.
+READING_PRIORITY = 10
 
 
 class Mouth:
@@ -111,10 +115,11 @@ class Mouth:
 
         for surface, reading in self._config.readings.items():
             pronunciation, accent_type = parse_reading(reading)
-            params = {"surface": surface, "pronunciation": pronunciation,
-                      "accent_type": accent_type, "word_type": "PROPER_NOUN"}
+            params = {"surface": surface, "pronunciation": pronunciation, "accent_type": accent_type,
+                      "word_type": "PROPER_NOUN", "priority": READING_PRIORITY}
             uuid, word = uuid_by_surface.get(_same_width(surface), (None, None))
-            if word and word.get("pronunciation") == pronunciation and word.get("accent_type") == accent_type:
+            if word and (word.get("pronunciation"), word.get("accent_type"), word.get("priority")) == (
+                    pronunciation, accent_type, READING_PRIORITY):
                 continue
             if uuid:
                 request = self._session.put(f"/user_dict_word/{uuid}", params=params)
