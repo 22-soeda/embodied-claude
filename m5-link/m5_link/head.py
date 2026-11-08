@@ -129,7 +129,13 @@ class Head:
             tools=["Read"],
             allowed_tools=["Read", *(f"mcp__{name}" for name in mcp_servers)],
             permission_mode="dontAsk",
-            env={"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
+            env={
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+                # With a claude.ai login, the account's connectors (Notion, Calendar,
+                # Drive...) load automatically: ~200 tools, about 170k tokens on
+                # every turn. The body needs none of them.
+                "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+            },
             resume=resume,
             cli_path=shutil.which("claude"),
         )

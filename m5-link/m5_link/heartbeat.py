@@ -65,7 +65,7 @@ class Heartbeat:
             process = await asyncio.create_subprocess_exec(
                 str(GIT_BASH), "-l", "-c", _posix_path(script),
                 cwd=REPO_ROOT,
-                env=_environment_without_claude_session(),
+                env=_heartbeat_environment(),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
                 creationflags=0x08000000 if sys.platform == "win32" else 0,  # no console window
@@ -94,6 +94,14 @@ def _posix_path(path: Path) -> str:
     return f"/{drive.rstrip(':').lower()}{rest}"
 
 
-def _environment_without_claude_session() -> dict[str, str]:
-    """`claude -p` refuses to start inside another Claude Code session's environment."""
-    return {key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")}
+def _heartbeat_environment() -> dict[str, str]:
+    """Our environment minus what would trip up `claude -p`.
+
+    CLAUDE* variables: `claude -p` refuses to start inside another Claude Code
+    session's environment. The claude.ai connectors (Notion, Calendar, Drive...)
+    are switched off: the heartbeat lives on the project's own MCP servers and
+    is not allowed to call the connectors anyway.
+    """
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")}
+    environment["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false"
+    return environment

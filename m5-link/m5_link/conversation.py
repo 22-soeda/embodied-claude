@@ -23,6 +23,9 @@ log = logging.getLogger(__name__)
 
 CAPTURE_DIR = REPO_ROOT / "captures"  # ignored by Git in the upstream .gitignore
 SPOKEN_EVENTS = {"picked_up", "shaken"}  # body events worth a word from the head
+# The body makes its surprised face by itself every time; the head adds a word
+# at most this often, or carrying the body around turns into chatter.
+EVENT_WORD_GAP_SECS = 180
 
 
 @dataclass
@@ -38,6 +41,7 @@ class Conversation:
     def __init__(self, body: Body, ears: Ears, head: Head, mouth: Mouth) -> None:
         self.body, self.ears, self.head, self.mouth = body, ears, head, mouth
         self.lines: deque[LogLine] = deque(maxlen=200)
+        self._last_event_word_at = -EVENT_WORD_GAP_SECS  # monotonic seconds
         body.on_utterance = self.hear_voice
         body.on_mitemite = self.see_picture
         body.on_event = self.feel_event
@@ -69,6 +73,9 @@ class Conversation:
     async def feel_event(self, event: BodyEvent) -> None:
         if event.kind not in SPOKEN_EVENTS or self.head.is_thinking or self.body.is_speaking:
             return
+        if time.monotonic() - self._last_event_word_at < EVENT_WORD_GAP_SECS:
+            return
+        self._last_event_word_at = time.monotonic()
         descriptions = {"picked_up": "体が持ち上げられた", "shaken": "体が揺さぶられた"}
         await self.respond(descriptions[event.kind], source="体", log_input=False)
 

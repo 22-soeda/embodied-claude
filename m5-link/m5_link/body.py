@@ -61,7 +61,9 @@ class Body:
 
     async def serve(self, request: web.Request) -> web.WebSocketResponse:
         """Run one body connection until it closes. A new body replaces the old."""
-        socket = web.WebSocketResponse(heartbeat=20, max_msg_size=4 * 1024 * 1024)
+        # The Arduino WebSockets client always asks for the "arduino" subprotocol;
+        # accepting it keeps aiohttp from warning on every connection.
+        socket = web.WebSocketResponse(heartbeat=20, max_msg_size=4 * 1024 * 1024, protocols=("arduino",))
         await socket.prepare(request)
         if self._socket is not None and not self._socket.closed:
             log.info("a new body connection replaces the old one")
