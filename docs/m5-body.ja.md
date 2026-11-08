@@ -48,6 +48,16 @@ body url: ws://192.168.3.17:8790/body  token: xxxxxxxx
 
 m5-link は 1 時間おきの定期起床も受け持つ。タスクスケジューラの heartbeat は登録しない（二重に起きる）。
 
+ふだんは、ログオン時に自動で起動するように登録しておく。落ちても 1 分で起き直す。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\register-m5-link.ps1
+```
+
+`git pull` でコードを更新したら、同じ 1 行をもう一度流すと再起動する。動いている m5-link を、頭や MCP サーバー、声のエンジンまで含めて止めてから起動し直す。タスクスケジューラの「終了」だけだと一番上の conhost しか止まらず、残りがポートを持ったまま残る。外すときは `-Unregister` を付ける。
+
+頭の会話セッションは `m5-link/state/head-session-id` を引き継いで続く。頭に渡す道具や設定を変えたときは、このファイルを消してから再起動する。引き継いだセッションは、外した道具の定義も最初の形のまま送り続けるので。
+
 ## 体に書き込む
 
 CoreS3 を USB-C でデスクトップかノートにつなぐ。

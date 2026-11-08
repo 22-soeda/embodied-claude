@@ -12,6 +12,12 @@
     When m5-link runs, do not also register scripts\windows\register-heartbeat.ps1:
     the heartbeat would then run twice.
 
+    Running the script again restarts m5-link, for example after `git pull`.
+    It first ends any m5-link already running, together with everything below
+    it, because Stop-ScheduledTask ends only conhost: uv, Python, the head
+    (claude.exe), the MCP servers and the speech engine would keep running and
+    hold the port.
+
 .EXAMPLE
     powershell -NoProfile -File scripts\windows\register-m5-link.ps1
     powershell -NoProfile -File scripts\windows\register-m5-link.ps1 -Unregister
@@ -24,6 +30,24 @@ $ErrorActionPreference = "Stop"
 
 $taskPath = "\EmbodiedClaude\"
 $taskName = "m5-link"
+
+function Stop-RunningM5Link {
+    # Match the uv launcher and its Python by their command line, then end each
+    # whole process tree. `-m m5_link.body_mcp` (the head's MCP server) does not
+    # match; it dies with the tree it belongs to.
+    $roots = Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -in "uv.exe", "python.exe" -and $_.CommandLine -match '-m m5_link"?\s*$'
+    }
+    foreach ($root in $roots) {
+        taskkill /PID $root.ProcessId /T /F 2>&1 | Out-Null
+    }
+    if ($roots) { Write-Output "stopped the m5-link that was running" }
+}
+
+if (Get-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskPath $taskPath -TaskName $taskName
+}
+Stop-RunningM5Link
 
 if ($Unregister) {
     Unregister-ScheduledTask -TaskPath $taskPath -TaskName $taskName -Confirm:$false
