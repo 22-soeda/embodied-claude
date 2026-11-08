@@ -318,6 +318,9 @@ String writeStatusJson() {
   status["speaking"] = voice.isSpeaking();
   status["battery"] = senses.batteryPercent();
   status["charging"] = senses.isCharging();
+  // The AXP2101 percentage jumps around; the voltages show whether USB really charges.
+  status["battery_mv"] = M5.Power.getBatteryVoltage();
+  status["vbus_mv"] = M5.Power.getVBUSVoltage();
   status["proximity"] = senses.proximity();
   status["light"] = senses.ambientLight();
   status["camera"] = isCameraReady();

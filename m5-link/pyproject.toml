@@ -7,7 +7,7 @@ dependencies = [
     "aiohttp>=3.10",
     "claude-agent-sdk>=0.1.0",
     "faster-whisper>=1.1.0",
-    "mcp>=1.20",
+    "mcp>=1.20,<2",  # body_mcp uses FastMCP, which mcp 2.x renamed to MCPServer
     "numpy>=2.0",
 ]
 
