@@ -38,6 +38,14 @@ NOTIFY_SERVER = {
     "args": ["run", "--no-sync", "python", "desktop-notify-mcp/server.py"],
 }
 
+# The M5 body, through m5-link (added with --with-body). It runs in m5-link's
+# own environment, so `uv sync --project m5-link` has to have happened.
+BODY_SERVER_NAME = "body"
+BODY_SERVER = {
+    "command": "uv",
+    "args": ["run", "--project", "m5-link", "--no-sync", "python", "-m", "m5_link.body_mcp"],
+}
+
 # What a heartbeat may do without asking. Writes are limited to the agent's own
 # notes; Bash and PowerShell are left out on purpose.
 HEARTBEAT_ALLOW = [
@@ -62,6 +70,14 @@ V0_DAY_TIME_RULE = (
     "list_recent_notifications で見られる。"
 )
 V0_NIGHT_TIME_RULE = "深夜帯。notify は使わないこと。静かに考えるか、記憶を整理するだけ。"
+
+BODY_DAY_TIME_RULE = (
+    "M5Stack の体がある（顔・カメラ・マイク・スピーカー・タッチ・傾き・近接センサー）。"
+    "人が近くにいそうなとき（body の get_body_state で near が true、list_body_events に最近の touch や "
+    "picked_up がある）は body の say で声をかけてよい。いなさそうなときは notify（PC の通知）を使う。"
+    "どちらも伝えたいことがあるときだけ、1 回の Heartbeat で多くても 1 回。部屋を見たいときは body の see。"
+)
+BODY_NIGHT_TIME_RULE = "深夜帯。say も notify も使わない。体の顔を sleepy にして、静かに考えるか記憶を整理するだけ。"
 
 HEARTBEAT_SETTINGS = {
     "HEARTBEAT_MODEL": "sonnet",
@@ -102,26 +118,44 @@ def add_notify_server() -> None:
         print(f"added     .mcp.json {NOTIFY_SERVER_NAME} server")
 
 
-def update_local_settings() -> None:
+def add_body_server() -> bool:
+    if not (REPO_ROOT / "m5-link" / ".venv").exists():
+        print("skipped   body server: run `uv sync --project m5-link` first")
+        return False
+    mcp_path = REPO_ROOT / ".mcp.json"
+    config = read_json(mcp_path)
+    servers = config.setdefault("mcpServers", {})
+    if servers.get(BODY_SERVER_NAME) == BODY_SERVER:
+        print(f"kept      .mcp.json {BODY_SERVER_NAME} server")
+        return True
+    servers[BODY_SERVER_NAME] = BODY_SERVER
+    write_json(mcp_path, config)
+    print(f"added     .mcp.json {BODY_SERVER_NAME} server")
+    return True
+
+
+def update_local_settings(with_body: bool) -> None:
     settings_path = REPO_ROOT / ".claude" / "settings.local.json"
     settings = read_json(settings_path)
+    server_names = [NOTIFY_SERVER_NAME] + ([BODY_SERVER_NAME] if with_body else [])
 
     enabled = settings.setdefault("enabledMcpjsonServers", [])
     if OLD_NOTIFY_SERVER_NAME in enabled:
         enabled.remove(OLD_NOTIFY_SERVER_NAME)
-    if NOTIFY_SERVER_NAME not in enabled:
-        enabled.append(NOTIFY_SERVER_NAME)
+    for name in server_names:
+        if name not in enabled:
+            enabled.append(name)
 
     allow = settings.setdefault("permissions", {}).setdefault("allow", [])
     old_rule = f"mcp__{OLD_NOTIFY_SERVER_NAME}"
     if old_rule in allow:
         allow.remove(old_rule)
-    for rule in HEARTBEAT_ALLOW:
+    for rule in HEARTBEAT_ALLOW + [f"mcp__{name}" for name in server_names]:
         if rule not in allow:
             allow.append(rule)
 
     write_json(settings_path, settings)
-    print(f"updated   .claude/settings.local.json ({NOTIFY_SERVER_NAME} approval, permissions.allow)")
+    print(f"updated   .claude/settings.local.json ({', '.join(server_names)} approval, permissions.allow)")
 
 
 def copy_if_missing(template: str, target: str) -> bool:
@@ -148,10 +182,13 @@ def set_shell_variable(lines: list[str], key: str, value: str) -> None:
     lines.append(assignment)
 
 
-def configure_schedule(created: bool) -> None:
+def configure_schedule(created: bool, with_body: bool) -> None:
     path = REPO_ROOT / "schedule.conf"
     lines = path.read_text(encoding="utf-8").splitlines()
-    if created:
+    if with_body:
+        set_shell_variable(lines, "DAY_TIME_RULE", BODY_DAY_TIME_RULE)
+        set_shell_variable(lines, "NIGHT_TIME_RULE", BODY_NIGHT_TIME_RULE)
+    elif created:
         set_shell_variable(lines, "DAY_TIME_RULE", V0_DAY_TIME_RULE)
         set_shell_variable(lines, "NIGHT_TIME_RULE", V0_NIGHT_TIME_RULE)
     for key, value in HEARTBEAT_SETTINGS.items():
@@ -190,13 +227,19 @@ def main() -> None:
         action="store_true",
         help="overwrite autonomous-action.sh with autonomous-action.sample.sh",
     )
+    parser.add_argument(
+        "--with-body",
+        action="store_true",
+        help="add the M5 body (m5-link's body MCP) and switch the time rules to the body-aware ones",
+    )
     args = parser.parse_args()
 
     add_notify_server()
-    update_local_settings()
+    with_body = args.with_body and add_body_server()
+    update_local_settings(with_body)
 
     schedule_created = copy_if_missing("schedule.sample.conf", "schedule.conf")
-    configure_schedule(schedule_created)
+    configure_schedule(schedule_created, with_body)
 
     copy_if_missing("desires.sample.conf", "desires.conf")
     add_talk_desire(args.companion)

@@ -1,0 +1,96 @@
+"""Start m5-link: `uv run --project m5-link python -m m5_link` from the repo root.
+
+The web server comes up first, so the body can connect and show NO BRAIN ->
+awake as soon as possible; the speech engine, speech recognition and the head
+wake up in the background, each logging when it is ready.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import socket
+from logging.handlers import RotatingFileHandler
+
+from aiohttp import web
+
+from .body import Body
+from .config import STATE_DIR, load_config
+from .conversation import Conversation
+from .ears import Ears
+from .head import Head
+from .heartbeat import Heartbeat
+from .mouth import Mouth
+from .server import build_app
+
+log = logging.getLogger("m5_link")
+
+
+def setup_logging() -> None:
+    STATE_DIR.mkdir(exist_ok=True)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S")
+    file_handler = RotatingFileHandler(STATE_DIR / "m5-link.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    console_handler = logging.StreamHandler()
+    for handler in (file_handler, console_handler):
+        handler.setFormatter(formatter)
+        logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(logging.INFO)
+    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+
+
+async def wake_up(name: str, starter) -> None:
+    try:
+        await starter()
+    except Exception:  # noqa: BLE001 - one missing part must not take the others down
+        log.exception("%s failed to start", name)
+
+
+def lan_address() -> str:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))  # no packet is sent; this just picks the outgoing interface
+            return probe.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+
+
+async def main() -> None:
+    setup_logging()
+    config = load_config()
+
+    body = Body()
+    ears = Ears(config.ears)
+    mouth = Mouth(config.mouth)
+    head = Head(config.head)
+    heartbeat = Heartbeat(config.heartbeat)
+    conversation = Conversation(body, ears, head, mouth)
+
+    runner = web.AppRunner(build_app(config, body, conversation, heartbeat))
+    await runner.setup()
+    await web.TCPSite(runner, config.server.host, config.server.port).start()
+
+    address = lan_address()
+    log.info("web page: http://127.0.0.1:%d/  (from other devices: http://%s:%d/?token=%s)",
+             config.server.port, address, config.server.port, config.server.token)
+    log.info("body url: ws://%s:%d/body  token: %s", address, config.server.port, config.server.token)
+
+    background = [
+        asyncio.create_task(wake_up("speech engine", mouth.start)),
+        asyncio.create_task(wake_up("speech recognition", ears.load)),
+        asyncio.create_task(wake_up("head", head.start)),
+        asyncio.create_task(heartbeat.run_forever()),
+    ]
+    try:
+        await asyncio.gather(*background)
+        await asyncio.Event().wait()
+    finally:
+        await head.close()
+        await mouth.close()
+        await runner.cleanup()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

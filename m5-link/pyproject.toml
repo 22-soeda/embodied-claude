@@ -1,0 +1,26 @@
+[project]
+name = "m5-link"
+version = "0.1.0"
+description = "Desktop side of the M5Stack CoreS3 body: speech in, the head's reply out, and an MCP server for the head to use the body."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "aiohttp>=3.10",
+    "claude-agent-sdk>=0.1.0",
+    "faster-whisper>=1.1.0",
+    "mcp>=1.20",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+# Speech recognition on an NVIDIA GPU. Without these the CPU is used.
+cuda = [
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12>=9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["m5_link"]

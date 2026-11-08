@@ -61,6 +61,9 @@ members = [
     "wifi-cam-mcp",
     "x-mcp",
 ]
+# m5-link (the desktop side of the M5Stack body) has its own environment:
+# its CUDA speech-recognition stack has no business in the MCP servers' lock.
+exclude = ["m5-link"]
 
 [tool.uv.sources]
 agent-grammar = { workspace = true }
