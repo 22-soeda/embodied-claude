@@ -10,6 +10,14 @@
 //   tap        talk once (tap again to stop listening or speaking)
 //   long press talk back and forth until a turn ends in silence
 //   swipe      "みてみて": take a picture and show it to the head
+//   asleep     three quick taps wake it; anything else is only noted
+//
+// Sleep, as PetitOnes' bodies sleep: the head puts the body to sleep (and
+// wakes it), or the body sleeps by itself when the battery reaches 10 %.
+// Falling asleep, the eyes close, a soft sound plays and the screen dims; the
+// body neither listens nor speaks until it is woken by the head or by three
+// quick taps. A body that has lost its head for a minute also shows its
+// sleeping face, but wakes as soon as the head is back.
 //
 // Structure and many details follow PetitOnes/m5-petit-firmware (MIT): the
 // procedural face, Wi-Fi slots tried in order, the shared mic/speaker port,
@@ -29,20 +37,28 @@
 #include "wifi_keeper.h"
 
 namespace {
-const char* kFirmwareVersion = "0.1.0";
+const char* kFirmwareVersion = "0.2.0";
 
 const uint32_t kSleepAfterHeadLostMs = 60 * 1000;
 const uint32_t kThinkingGiveUpMs = 90 * 1000;
 const uint32_t kStateReportIntervalMs = 30 * 1000;
 const uint32_t kCaptionAfterSpeechMs = 4000;
-const int kCriticalBatteryPercent = 5;
+const int kSleepBatteryPercent = 10;      // PetitOnes: asleep at 10 % or less, not charging
+const uint32_t kBatteryCheckIntervalMs = 30 * 1000;
+const int kWakeTaps = 3;                    // PetitOnes: three taps wake a sleeping body
+const uint32_t kWakeTapGapMs = 1000;        // each within a second of the last
 
 BodySettings settings;
 WifiKeeper wifi_keeper;
 
+enum class SleepReason { Awake, Head, Battery };
+
 bool is_conversation_loop = false;  // listen again after each reply
-bool head_asked_to_sleep = false;
-uint32_t poked_awake_until_ms = 0;
+SleepReason sleep_reason = SleepReason::Awake;
+int taps_while_asleep = 0;
+uint32_t last_tap_while_asleep_ms = 0;
+uint32_t last_battery_check_ms = 0;
+bool skipping_speech_while_asleep = false;
 uint32_t thinking_since_ms = 0;
 uint32_t last_state_report_ms = 0;
 uint32_t last_serial_heartbeat_ms = 0;
@@ -56,11 +72,20 @@ void sendType(const char* type) {
   brainLink.sendJson(message);
 }
 
-void sendEvent(const char* kind) {
+void sendEvent(const char* kind, const char* reason = nullptr) {
   JsonDocument message;
   message["t"] = "event";
   message["kind"] = kind;
+  if (reason) message["reason"] = reason;
   brainLink.sendJson(message);
+}
+
+const char* sleepReasonName() {
+  switch (sleep_reason) {
+    case SleepReason::Head: return "head";
+    case SleepReason::Battery: return "battery";
+    default: return brainLink.isConnected() ? nullptr : "no_head";
+  }
 }
 
 void sendState() {
@@ -74,6 +99,9 @@ void sendState() {
   message["rssi"] = WiFi.RSSI();
   message["ssid"] = wifi_keeper.connectedSsid();
   message["uptime_s"] = millis() / 1000;
+  message["asleep"] = sleep_reason != SleepReason::Awake;
+  message["sleep_reason"] = sleepReasonName();
+  message["power_save"] = face.isPowerSave();
   brainLink.sendJson(message);
   last_state_report_ms = millis();
 }
@@ -85,15 +113,46 @@ void sendMicChunk(const int16_t* samples, size_t count) {
 
 // ------------------------------------------------------------ being awake
 
-bool isBatteryCritical() {
-  const int percent = senses.batteryPercent();
-  return percent >= 0 && percent <= kCriticalBatteryPercent && !senses.isCharging();
+bool isAsleep() {
+  if (sleep_reason != SleepReason::Awake) return true;
+  return !brainLink.isConnected() && brainLink.msSinceLost() > kSleepAfterHeadLostMs;
 }
 
-bool isAsleep() {
-  if (millis() < poked_awake_until_ms) return false;
-  if (head_asked_to_sleep || isBatteryCritical()) return true;
-  return !brainLink.isConnected() && brainLink.msSinceLost() > kSleepAfterHeadLostMs;
+void cancelListening();
+
+void goToSleep(SleepReason reason) {
+  if (sleep_reason != SleepReason::Awake) return;
+  if (voice.isListening()) cancelListening();
+  if (voice.isSpeaking()) {
+    voice.stopSpeaking();
+    sendType("speech_interrupted");
+  }
+  is_conversation_loop = false;
+  face.setActivity(Activity::None);
+  sleep_reason = reason;
+  taps_while_asleep = 0;
+  voice.playChime(Chime::FallAsleep);
+  sendEvent("slept", sleepReasonName());
+  sendState();
+}
+
+void wakeUp(const char* reason) {
+  if (sleep_reason == SleepReason::Awake) return;
+  sleep_reason = SleepReason::Awake;
+  taps_while_asleep = 0;
+  voice.playChime(Chime::WakeUp);
+  sendEvent("woke", reason);
+  sendState();
+}
+
+void sleepIfBatteryLow() {
+  if (millis() - last_battery_check_ms < kBatteryCheckIntervalMs) return;
+  last_battery_check_ms = millis();
+  const int percent = senses.batteryPercent();
+  // 0 is left out as PetitOnes do: the gauge can read 0 for a moment on USB.
+  if (percent > 0 && percent <= kSleepBatteryPercent && !senses.isCharging()) {
+    goToSleep(SleepReason::Battery);
+  }
 }
 
 const char* statusBadge() {
@@ -216,6 +275,10 @@ void onHeadMessage(JsonDocument& message) {
   } else if (strcmp(type, "look") == 0) {
     face.lookAt(message["x"] | 0, message["y"] | 0, message["ms"] | 3000);
   } else if (strcmp(type, "speak_start") == 0) {
+    if (isAsleep()) {  // no sound while asleep; tell the head it is done at speak_end
+      skipping_speech_while_asleep = true;
+      return;
+    }
     if (voice.isListening()) voice.stopListening();
     if (voice.beginSpeech(message["bytes"] | 0, message["rate"] | 16000)) {
       last_spoken_text = message["text"] | "";
@@ -223,6 +286,11 @@ void onHeadMessage(JsonDocument& message) {
       face.setActivity(Activity::Speaking);
     }
   } else if (strcmp(type, "speak_end") == 0) {
+    if (skipping_speech_while_asleep) {
+      skipping_speech_while_asleep = false;
+      sendType("spoken");
+      return;
+    }
     voice.finishSpeech();
   } else if (strcmp(type, "caption") == 0) {
     face.showCaption(message["text"] | "", message["ms"] | 6000);
@@ -236,16 +304,18 @@ void onHeadMessage(JsonDocument& message) {
       if (is_conversation_loop) startListening(true);  // nothing to say; keep listening
     }
   } else if (strcmp(type, "listen") == 0) {
-    startListening(message["loop"] | is_conversation_loop);
+    if (!isAsleep()) startListening(message["loop"] | is_conversation_loop);
   } else if (strcmp(type, "stop_listening") == 0) {
     if (voice.isListening()) cancelListening();
   } else if (strcmp(type, "snapshot") == 0) {
     takeSnapshot("requested", message["id"] | "");
   } else if (strcmp(type, "sleep") == 0) {
-    head_asked_to_sleep = true;
+    goToSleep(SleepReason::Head);
   } else if (strcmp(type, "wake") == 0) {
-    head_asked_to_sleep = false;
-    face.reflexBlink();
+    wakeUp("head");
+  } else if (strcmp(type, "power_save") == 0) {
+    face.setPowerSave(message["on"] | true);
+    sendState();
   } else if (strcmp(type, "config") == 0) {
     applyConfig(message);
   }
@@ -257,8 +327,22 @@ void onHeadAudio(const uint8_t* pcm, size_t length) {
 
 // ------------------------------------------------------------ touch
 
+void handleTouchWhileAsleep(const m5::touch_detail_t& touch) {
+  if (!touch.wasClicked()) return;  // swipes and long presses do nothing while asleep
+  if (sleep_reason == SleepReason::Awake) return;  // only the head is missing; nothing to wake
+  const uint32_t now = millis();
+  taps_while_asleep = now - last_tap_while_asleep_ms <= kWakeTapGapMs ? taps_while_asleep + 1 : 1;
+  last_tap_while_asleep_ms = now;
+  if (taps_while_asleep == 1) sendEvent("poked");
+  if (taps_while_asleep >= kWakeTaps) wakeUp("touch");
+}
+
 void handleTouch() {
   const auto touch = M5.Touch.getDetail();
+  if (isAsleep()) {
+    handleTouchWhileAsleep(touch);
+    return;
+  }
 
   if (touch.wasFlicked()) {
     face.reflexBlink();
@@ -268,7 +352,6 @@ void handleTouch() {
   }
   if (touch.wasHold()) {
     face.reflexBlink();
-    poked_awake_until_ms = millis() + 3000;
     startListening(/* keep_looping = */ true);
     return;
   }
@@ -282,10 +365,6 @@ void handleTouch() {
     is_conversation_loop = false;
     face.setActivity(Activity::None);
     sendType("speech_interrupted");
-  } else if (isAsleep()) {
-    poked_awake_until_ms = millis() + 5000;
-    face.showMood(Mood::Surprised, 1200);
-    sendEvent("poked");
   } else {
     startListening(/* keep_looping = */ false);
   }
@@ -296,6 +375,7 @@ void handleTouch() {
 void reactToBodyEvent(BodyEvent event) {
   if (event == BodyEvent::None) return;
   sendEvent(bodyEventName(event));
+  if (isAsleep()) return;  // noted, but a sleeping face does not react
   if (event == BodyEvent::PickedUp || event == BodyEvent::Shaken) {
     face.showMood(Mood::Surprised, 1500);
   } else if (event == BodyEvent::Near) {
@@ -314,6 +394,8 @@ String writeStatusJson() {
   status["link_url"] = settings.link_url;
   status["link_connected"] = brainLink.isConnected();
   status["asleep"] = isAsleep();
+  status["sleep_reason"] = sleepReasonName();
+  status["power_save"] = face.isPowerSave();
   status["listening"] = voice.isListening();
   status["speaking"] = voice.isSpeaking();
   status["battery"] = senses.batteryPercent();
@@ -356,7 +438,6 @@ void setup() {
   config.internal_spk = true;
   M5.begin(config);
   Serial.begin(115200);
-  M5.Display.setBrightness(150);
   randomSeed(esp_random());
 
   settings.load();
@@ -386,6 +467,7 @@ void loop() {
   updateDebugStatus();
   handleTouch();
   reactToBodyEvent(senses.update());
+  sleepIfBatteryLow();
 
   const ListenEnd listen_end = voice.updateListening();
   if (listen_end != ListenEnd::StillListening) finishListening(listen_end);

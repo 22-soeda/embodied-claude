@@ -51,13 +51,13 @@ speed = 1.05
 
 [heartbeat]
 enabled = true     # run autonomous-action.sh on a schedule, instead of Task Scheduler
-interval_minutes = 60
+interval_minutes = 30   # as PetitOnes; the script still thins beats outside active hours
 
 [nightly]
 # As PetitOnes does it: a diary page from the day's memories, then the memory sleep.
 diary_at = "23:50"
 memory_sleep_at = "04:05"   # after the conversation session is closed at day_starts_at
-wake_at = "07:00"           # wake the body, in case the head put it to sleep and did not wake it
+wake_at = ""                # "07:00" to wake the body if the head did not; PetitOnes leave waking to the head
 
 [backup]
 # The agent's own files and databases, zipped every night. Somewhere off this PC's
@@ -103,14 +103,14 @@ class MouthConfig:
 @dataclass(frozen=True)
 class HeartbeatConfig:
     enabled: bool = True
-    interval_minutes: int = 60
+    interval_minutes: int = 30
 
 
 @dataclass(frozen=True)
 class NightlyConfig:
     diary_at: str = "23:50"         # "" to turn off
     memory_sleep_at: str = "04:05"  # "" to turn off
-    wake_at: str = "07:00"          # "" to turn off
+    wake_at: str = ""               # e.g. "07:00"; off by default, as in PetitOnes
 
 
 @dataclass(frozen=True)

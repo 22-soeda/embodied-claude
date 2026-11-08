@@ -86,3 +86,13 @@ def test_the_read_mark_never_moves_back(tmp_path):
     diary.mark_read("conversation", 200.0)
     diary.mark_read("conversation", 100.0)
     assert diary.read_until("conversation") == 200.0
+
+
+def test_sleeping_and_waking_are_told_apart_by_why():
+    from m5_link.body_diary import DESCRIPTIONS, diary_kind
+    assert diary_kind("slept", "head") == "slept"
+    assert diary_kind("slept", "battery") == "slept_battery"
+    assert diary_kind("woke", "touch") == "woken_by_touch"
+    assert diary_kind("woke", "head") == "woke"
+    assert diary_kind("picked_up", None) == "picked_up"
+    assert {"slept", "slept_battery", "woke", "woken_by_touch"} <= set(DESCRIPTIONS)

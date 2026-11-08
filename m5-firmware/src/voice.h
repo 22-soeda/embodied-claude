@@ -11,6 +11,9 @@
 // Speaking buffers one whole utterance in PSRAM, then plays it and moves the
 // mouth from a loudness envelope computed up front.
 enum class ListenEnd { StillListening, Silence, NoSpeech, MaxLength };
+// Short soft sounds for falling asleep and waking, where PetitOnes play
+// zzz.wav and wakeup.wav from the SD card (this body has no SD files).
+enum class Chime { FallAsleep, WakeUp };
 
 class Voice {
  public:
@@ -36,6 +39,9 @@ class Voice {
   bool updateSpeaking();
   bool isSpeaking() const { return is_playing_ || is_receiving_speech_; }
   float mouthLevel() const;
+
+  // --- small sounds ---
+  void playChime(Chime chime);
 
  private:
   void switchToMicrophone();

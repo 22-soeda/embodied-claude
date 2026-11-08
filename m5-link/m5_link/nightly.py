@@ -12,8 +12,9 @@ it every time, so a new day's session knows the last few days.
 Backup: at 04:30, after the sleep, the agent's own files and databases are zipped
 into [backup] dir (backup.py).
 
-Morning: at 07:00 the body is woken, in case the head put it to sleep with the
-body MCP's sleep() and did not wake it.
+Morning (off unless [nightly] wake_at is set): the body is woken at that time,
+in case the head put it to sleep and did not wake it. PetitOnes leave waking to
+the head's morning beat and to three taps on the body, and so does the default.
 
 Sleep: memory-mcp's `memory_mcp.sleep` (ported from PetitOnes/m5-petit-memory)
 merges near-duplicate memories, lowers the importance of fading ones and

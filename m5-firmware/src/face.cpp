@@ -44,6 +44,7 @@ void Face::begin(uint32_t face_rgb) {
   canvas.setColorDepth(16);
   canvas.createSprite(kScreenWidth, kScreenHeight);
   next_blink_ms_ = millis() + random(2000, 5000);
+  applyBrightness();
 }
 
 void Face::setFaceColor(uint32_t face_rgb) {
@@ -87,7 +88,33 @@ void Face::showCaption(const String& text, uint32_t duration_ms) {
 void Face::setAsleep(bool asleep) {
   if (asleep == is_asleep_) return;
   is_asleep_ = asleep;
-  M5.Display.setBrightness(asleep ? 20 : 150);
+  dimmed_for_sleep_ = false;
+  if (asleep) {
+    fell_asleep_ms_ = millis();
+  } else {
+    blink_started_ms_ = millis();  // wake with a blink
+  }
+  applyBrightness();
+}
+
+void Face::setPowerSave(bool on) {
+  power_save_ = on;
+  applyBrightness();
+}
+
+void Face::applyBrightness() {
+  // While the eyes are closing the screen stays lit; it dims once asleep (see update()).
+  if (is_asleep_ && millis() - fell_asleep_ms_ >= kFallAsleepMs) {
+    M5.Display.setBrightness(kAsleepBrightness);
+  } else {
+    M5.Display.setBrightness(power_save_ ? min(kPowerSaveBrightness, kAwakeBrightness) : kAwakeBrightness);
+  }
+}
+
+float Face::eyesClosing() const {
+  if (!is_asleep_) return 0;
+  const uint32_t since = millis() - fell_asleep_ms_;
+  return since >= kFallAsleepMs ? 1.0f : static_cast<float>(since) / kFallAsleepMs;
 }
 
 void Face::reflexBlink() {
@@ -96,8 +123,16 @@ void Face::reflexBlink() {
 
 void Face::update() {
   const uint32_t now = millis();
-  if (now - last_frame_ms_ < 1000 / kFramesPerSecond) return;
+  const bool dozing = is_asleep_ && now - fell_asleep_ms_ < kFallAsleepMs;
+  const uint32_t frames_per_second = is_asleep_ && !dozing ? kAsleepFramesPerSecond
+                                     : power_save_         ? kPowerSaveFramesPerSecond
+                                                           : kFramesPerSecond;
+  if (now - last_frame_ms_ < 1000 / frames_per_second) return;
   last_frame_ms_ = now;
+  if (is_asleep_ && !dozing && !dimmed_for_sleep_) {  // the eyes have closed: dim now
+    applyBrightness();
+    dimmed_for_sleep_ = true;
+  }
 
   if (now >= next_blink_ms_) {
     blink_started_ms_ = now;
@@ -116,7 +151,8 @@ void Face::update() {
 }
 
 Mood Face::currentMood() const {
-  if (is_asleep_) return Mood::Sleepy;
+  if (is_asleep_ && eyesClosing() >= 1.0f) return Mood::Sleepy;
+  if (is_asleep_) return Mood::Neutral;  // eyes closing (see drawEyes)
   if (mood_until_ms_ != 0 && millis() > mood_until_ms_) return Mood::Neutral;
   return mood_;
 }
@@ -133,7 +169,7 @@ void Face::drawFrame() {
   drawEyes(center_x, center_y);
   drawMouth(center_x, center_y);
   if (activity_ == Activity::Thinking) drawThinkingDots(center_x, center_y);
-  if (is_asleep_) drawSleepZ(center_x, center_y);
+  if (is_asleep_ && eyesClosing() >= 1.0f) drawSleepZ(center_x, center_y);
   if (activity_ == Activity::Listening) drawListeningBar();
   drawBadge();
   if (has_caption) drawCaption();
@@ -164,6 +200,7 @@ void Face::drawEyes(int center_x, int center_y) {
     const float phase = static_cast<float>(since_blink) / kBlinkDurationMs;
     blink = phase < 0.5f ? phase * 2 : (1 - phase) * 2;
   }
+  if (is_asleep_) blink = max(blink, eyesClosing());  // falling asleep: the eyes close slowly
 
   for (int eye_x : eye_xs) {
     switch (mood) {

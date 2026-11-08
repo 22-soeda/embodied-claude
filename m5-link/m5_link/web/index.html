@@ -163,6 +163,10 @@ async function refresh() {
   );
   fillList(document.getElementById("body"), [
     ["名前", body.hello.name], ["ファーム", body.hello.fw],
+    ["眠り", state.asleep === undefined ? null : (state.asleep
+      ? `寝ている（${{head: "頭が寝かせた", battery: "電池が減った"}[state.sleep_reason] || state.sleep_reason}）`
+      : "起きている")],
+    ["省電力", state.power_save === undefined ? null : (state.power_save ? "オン" : "オフ")],
     ["電池", state.battery !== undefined ? `${state.battery}%${state.charging ? "（充電中）" : ""}` : null],
     ["Wi-Fi", state.ssid ? `${state.ssid} (${state.rssi} dBm)` : null],
     ["近く", state.near === undefined ? null : (state.near ? "何かいる" : "いない")],

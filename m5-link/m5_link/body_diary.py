@@ -38,6 +38,10 @@ DESCRIPTIONS = {
     "shaken": "揺さぶられた",
     "near": "近くに誰か来た",
     "poked": "寝ているところをつつかれた",
+    "slept": "眠った",
+    "slept_battery": "電池が減って、自分で眠った",
+    "woke": "起きた",
+    "woken_by_touch": "タップで起こされた",
     "battery_low": "電池が少なくなった",
     "said": "自分から体の声で話しかけた",  # with the words; never merged with another
 }
@@ -46,6 +50,15 @@ SAME_STRETCH_GAP_SECS = 10 * 60
 MAX_DIGEST_LINES = 12
 # Unread events older than this are not handed over any more.
 LOOKBACK_DAYS = 7
+
+
+def diary_kind(kind: str, reason: str | None) -> str:
+    """The diary's word for a body event: sleeping and waking are told apart by why."""
+    if kind == "slept":
+        return "slept_battery" if reason == "battery" else "slept"
+    if kind == "woke":
+        return "woken_by_touch" if reason == "touch" else "woke"
+    return kind
 
 
 @dataclass(frozen=True)

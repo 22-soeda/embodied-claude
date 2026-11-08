@@ -29,7 +29,7 @@ M5Stack CoreS3 の体（`m5-firmware/`）が、デスクトップの `m5-link/` 
 | `speech_interrupted` | 話している途中でタップされた | |
 | `snapshot` + （`0x02` JPEG） | 頼まれた写真、または「みてみて」（横にスワイプ） | `id` `reason`: `requested` `mitemite`、`bytes` |
 | `snapshot_failed` | カメラが撮れなかった | `id` |
-| `event` | 体に起きたこと | `kind`: `picked_up` `shaken` `near` `far` `battery_low` `poked` |
+| `event` | 体に起きたこと | `kind`: `picked_up` `shaken` `near` `far` `battery_low` `poked`（寝ているときのタップ） `slept` `woke`、眠り・目覚めには `reason`: `head` `battery` `touch` |
 
 話し終わりの判定は体がする。最初の約 0.2 秒で部屋の雑音を測り、その 2.5 倍（最低でも RMS 350）を超える音が 2 回続いたら「話している」、そのあと 0.9 秒静かなら「話し終わった」。6 秒なにも聞こえなければ `no_speech`。
 
@@ -46,6 +46,7 @@ M5Stack CoreS3 の体（`m5-firmware/`）が、デスクトップの `m5-link/` 
 | `stop_listening` | 聞くのをやめる | |
 | `snapshot` | 写真を撮る | `id` |
 | `sleep` / `wake` | 眠る・起きる | |
+| `power_save` | 省電力（明るさ 40 まで、顔は 10 回/秒） | `on` |
 | `config` | 設定を変えて保存 | `color`（RRGGBB）`volume`（0〜100）`name` |
 
 ## 顔の右上の印
@@ -59,7 +60,11 @@ M5Stack CoreS3 の体（`m5-firmware/`）が、デスクトップの `m5-link/` 
 | THINK | 頭が考えている |
 | LOOK | 写真を撮っている |
 
-頭と 60 秒つながらない、頭に `sleep` を頼まれた、電池 5% 以下のどれかで寝顔になる。寝顔でもタップすると 5 秒だけ起きる。
+眠り方は PetitOnes の体と同じ（ファーム 0.2.0 から）。頭に `sleep` を頼まれるか、電池が 10% 以下で充電していないと眠る。目がゆっくり閉じて小さな音が鳴り、明るさ 15 の寝顔になる。眠っているあいだは聞かず、話さない（頭から返事が来ても音を出さず、すぐ `spoken` を返す）。頭の `wake` か、1 秒以内に 3 回タップで起きる（起きる音が鳴る）。1〜2 回のタップは `poked` として伝えるだけ。
+
+頭と 60 秒つながらないときも寝顔になるが、これは眠りではなく、頭が戻ればそのまま起きる。
+
+`state` には `asleep`（眠っているか）、`sleep_reason`（`head` `battery`、頭がいないだけなら `no_head`）、`power_save` も載る。明るさの既定は 80（PetitOnes と同じ）。
 
 ## 体の設定
 

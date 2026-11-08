@@ -8,6 +8,7 @@
     POST /api/say       {"text", "mood"?}: speak through the body, no turn
     POST /api/face      {"mood", "ms"?}
     POST /api/sleep     {"asleep": true|false}: the body sleeps (screen dim, sleeping face) or wakes
+    POST /api/power_save {"on": true|false}: dimmer screen and fewer frames (PetitOnes' power save)
     POST /api/snapshot  take a picture; returns {"path"} under captures/
     POST /api/heartbeat run one heartbeat now
     POST /api/diary     {"date"?}: write that day's diary page now (normally 23:50)
@@ -94,6 +95,10 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         sent = await body.send({"t": "sleep" if asleep else "wake"})
         return web.json_response({"sent": sent, "asleep": asleep})
 
+    async def power_save(request: web.Request) -> web.Response:
+        on = bool((await request.json()).get("on", True))
+        return web.json_response({"sent": await body.send({"t": "power_save", "on": on}), "on": on})
+
     async def face(request: web.Request) -> web.Response:
         payload = await request.json()
         shown = await body.show_face(payload.get("mood", "neutral"), int(payload.get("ms", 5000)))
@@ -145,6 +150,7 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         web.post("/api/say", say),
         web.post("/api/face", face),
         web.post("/api/sleep", sleep_or_wake),
+        web.post("/api/power_save", power_save),
         web.post("/api/snapshot", snapshot),
         web.get("/captures/{name}", capture_file),
         web.post("/api/heartbeat", run_heartbeat),

@@ -70,9 +70,9 @@ def show_face(mood: str, seconds: int = 5) -> str:
 
 @mcp.tool()
 def sleep() -> str:
-    """Go to sleep: the body's screen dims to a sleeping face and it does not listen. A tap
-    only lets it peek for a few seconds (and is noted as being poked); it stays asleep until
-    wake(), or until m5-link wakes it in the morning ([nightly] wake_at, 07:00 by default).
+    """Go to sleep: the eyes close, a soft sound plays, the screen dims to a sleeping face, and the
+    body neither listens nor speaks. It wakes with wake(), or when someone taps it three times
+    quickly (one or two taps are only noted). With 10 % battery or less it sleeps by itself.
 
     For the night, or when the desire to sleep (want_to_sleep) is strong. Before sleeping,
     write 「おやすみ、スリープした」 to memory, so that on waking it is clear it had slept.
@@ -86,6 +86,16 @@ def wake() -> str:
     """Wake the body from sleep: normal face and brightness."""
     result = _call("POST", "/api/sleep", {"asleep": False})
     return "awake" if result.get("sent") else f"not woken: {result.get('error', 'body not connected')}"
+
+
+@mcp.tool()
+def set_power_save(on: bool = True) -> str:
+    """Power save: the screen at most 40 of 255 bright and the face drawn 10 times a second instead
+    of 30 (as PetitOnes' bodies do). For long quiet stretches, or when the battery is low."""
+    result = _call("POST", "/api/power_save", {"on": on})
+    if not result.get("sent"):
+        return f"not changed: {result.get('error', 'body not connected')}"
+    return "power save on" if on else "power save off"
 
 
 @mcp.tool()
@@ -105,7 +115,8 @@ def see() -> list:
 
 @mcp.tool()
 def get_body_state() -> str:
-    """Whether the body is connected, its battery, Wi-Fi, and whether something is near its screen."""
+    """Whether the body is connected and awake (asleep, and why), its battery, Wi-Fi, power save,
+    and whether something is near its screen."""
     status = _call("GET", "/api/status")
     if status.get("error"):
         return status["error"]

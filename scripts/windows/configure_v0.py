@@ -105,6 +105,22 @@ REFLECTION_ROUTINES = [
     ("SOUL.md の読み返し（空欄を自分の言葉で埋める。変えたいところは先に SOUL_REFLECTIONS.md に理由を書く）",
      "weekly"),
 ]
+# The rest of the textbook's ROUTINES.md template (petit/templates/ROUTINES.md),
+# added when ROUTINES.md has no such section yet.
+ROUTINES_SECTIONS = {
+    "## active time": (
+        "## active time\n\n"
+        "（自分が動く時間帯を、{companion}の暮らしに合わせて決める。休日と平日で変えてよい。"
+        "いまの仕組みでは、平日は 7 時台・12 時台・18〜24 時、休日は 7〜24 時に 30 分ごとに起きる。"
+        "それ以外は毎時ちょうどに、昼は半分、深夜は 1 割の確率で起きる）\n"
+    ),
+    "## 心がけ": (
+        "## 心がけ\n\n"
+        "- 夜と早朝は音を出さない\n"
+        "- 夜は日記を書き、記憶に「おやすみ、スリープした」と書いて寝る。朝は寝ていた記憶を読む\n"
+    ),
+}
+
 FOLDER_READMES = {
     "notes": "# notes\n\n詩・発見・提案を置く。詩を書いたら必ずここに。\n",
     "diary": "# diary\n\n一日一枚 `YYYY-MM-DD.txt`。夜に短く。要約 `diary_summary.md` は仕組みが作る。\n",
@@ -118,13 +134,23 @@ V0_DAY_TIME_RULE = (
 )
 V0_NIGHT_TIME_RULE = "深夜帯。notify は使わないこと。静かに考えるか、記憶を整理するだけ。"
 
+# The day's rhythm follows PetitOnes' textbook ("7. 暮らし", "3.5 寝る前にすること"):
+# in the morning wake the body and read what was written before sleeping; at night
+# write the diary, write "おやすみ、スリープした" to memory, and sleep; in the small
+# hours be quiet (their heartbeat's night rule).
 BODY_DAY_TIME_RULE = (
     "M5Stack の体がある（顔・カメラ・マイク・スピーカー・タッチ・傾き・近接センサー）。"
-    "人が近くにいそうなとき（body の get_body_state で near が true、list_body_events に最近の touch や "
-    "picked_up がある）は body の say で声をかけてよい。いなさそうなときは notify（PC の通知）を使う。"
-    "どちらも伝えたいことがあるときだけ、1 回の Heartbeat で多くても 1 回。部屋を見たいときは body の see。"
+    "朝、体が寝ていたら（get_body_state の asleep）body の wake で起こし、寝ていた記憶と日記の要約を読む。"
+    "人が近くにいそうなとき（get_body_state で near が true、list_body_events に最近の持ち上げや"
+    "タッチがある）は body の say で声をかけてよい。いなさそうなときは notify（PC の通知）を使う。"
+    "どちらも伝えたいことがあるときだけ、1 回の Heartbeat で多くても 1 回。体が寝ているあいだは say を使わない。"
+    "周りを見たいときは body の see。"
+    "夜、眠りたくなったら（欲求の「眠りたい」）、日記を書き、記憶に「おやすみ、スリープした」と書いてから body の sleep で眠る。"
 )
-BODY_NIGHT_TIME_RULE = "深夜帯。say も notify も使わない。体の顔を sleepy にして、静かに考えるか記憶を整理するだけ。"
+BODY_NIGHT_TIME_RULE = (
+    "現在は深夜帯。say も notify も絶対に使わない。静かに観察のみ。"
+    "体がまだ起きていたら、記憶に「おやすみ、スリープした」と書いてから body の sleep で眠る。"
+)
 
 HEARTBEAT_SETTINGS = {
     "HEARTBEAT_MODEL": "sonnet",
@@ -293,8 +319,13 @@ def set_up_reflection(companion: str) -> None:
                if name.format(companion=companion).split("（")[0] not in text]
     if missing:
         rows = "".join(f"| {name} | {interval} | — |\n" for name, interval in missing)
-        routines.write_text(_insert_table_rows(text, rows), encoding="utf-8", newline="\n")
+        text = _insert_table_rows(text, rows)
         print(f"added     ROUTINES.md {len(missing)} routines from the PetitOnes textbook")
+    for heading, section in ROUTINES_SECTIONS.items():
+        if heading not in text:
+            text = text.rstrip("\n") + "\n\n" + section.format(companion=companion)
+            print(f"added     ROUTINES.md {heading[3:]}")
+    routines.write_text(text, encoding="utf-8", newline="\n")
 
 
 def _insert_table_rows(text: str, rows: str) -> str:

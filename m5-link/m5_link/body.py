@@ -146,7 +146,8 @@ class Body:
         elif kind == "state":
             self.state = message
         elif kind == "event":
-            event = BodyEvent(message.get("kind", "?"))
+            detail = {key: value for key, value in message.items() if key not in ("t", "kind")}
+            event = BodyEvent(message.get("kind", "?"), detail=detail)
             self._remember(event)
             if self.on_event:
                 asyncio.create_task(self.on_event(event))

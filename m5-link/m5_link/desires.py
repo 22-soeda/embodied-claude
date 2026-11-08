@@ -41,6 +41,7 @@ UPDATER_TIMEOUT_SECS = 120
 TALK_RECORD_GAP_SECS = 30 * 60
 STRONG_LEVEL = 0.7  # PetitOnes: "act immediately on any desire with level >= 0.7"
 TALKING = "miss_companion"
+SLEEPING = "want_to_sleep"
 CONTACT_KINDS = {"picked_up", "shaken", "poked"}
 
 
@@ -59,6 +60,11 @@ class Desires:
         while True:
             await self.update()
             await asyncio.sleep(UPDATE_INTERVAL_SECS)
+
+    async def slept(self, reason: str) -> None:
+        """The body has fallen asleep: record it as meeting want_to_sleep."""
+        why = "電池が減ったので" if reason == "battery" else ""
+        await self.update(satisfy=SLEEPING, summary=f"{why}体が眠った")
 
     async def talked(self, how: str) -> None:
         """The companion talked with the body: record it as meeting miss_companion (rate-limited)."""

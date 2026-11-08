@@ -31,7 +31,13 @@ class Face {
   void setListeningLevel(float level);  // 0..1, while listening
   void setStatusBadge(const char* text);  // nullptr clears it
   void showCaption(const String& text, uint32_t duration_ms);
+  // Asleep: the eyes close over kFallAsleepMs, then a sleeping face at
+  // kAsleepBrightness. Awake again: the eyes open with a blink.
   void setAsleep(bool asleep);
+  bool isAsleep() const { return is_asleep_; }
+  // Power save (PetitOnes): brightness capped at kPowerSaveBrightness, 10 frames a second.
+  void setPowerSave(bool on);
+  bool isPowerSave() const { return power_save_; }
   void reflexBlink();
 
   // Call every loop; draws at most kFramesPerSecond times a second.
@@ -47,6 +53,8 @@ class Face {
   void drawBadge();
   void drawCaption();
   Mood currentMood() const;
+  float eyesClosing() const;  // 0 = open, 1 = closed, while falling asleep
+  void applyBrightness();
 
   uint16_t face_color_ = 0;
   uint16_t background_color_ = 0;
@@ -66,12 +74,22 @@ class Face {
   String caption_;
   uint32_t caption_until_ms_ = 0;
   bool is_asleep_ = false;
+  uint32_t fell_asleep_ms_ = 0;
+  bool dimmed_for_sleep_ = false;
+  bool power_save_ = false;
 
   uint32_t next_blink_ms_ = 0;
   uint32_t blink_started_ms_ = 0;
   uint32_t last_frame_ms_ = 0;
 
+  // Brightness and frame rates as in PetitOnes/m5-petit-firmware.
+  static const uint8_t kAwakeBrightness = 80;
+  static const uint8_t kPowerSaveBrightness = 40;
+  static const uint8_t kAsleepBrightness = 15;
   static const uint32_t kFramesPerSecond = 30;
+  static const uint32_t kPowerSaveFramesPerSecond = 10;
+  static const uint32_t kAsleepFramesPerSecond = 4;  // only the drifting "z" moves
+  static const uint32_t kFallAsleepMs = 1200;
   static const uint32_t kBlinkDurationMs = 160;
 };
 

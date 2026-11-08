@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
 from .body import Body, BodyEvent
-from .body_diary import BodyDiary
+from .body_diary import BodyDiary, diary_kind
 from .config import REPO_ROOT
 from .desires import Desires
 from .ears import Ears
@@ -80,7 +80,9 @@ class Conversation:
         # The body has already reacted by itself (a surprised face). The head
         # hears about it at its next turn, so carrying the body around does
         # not turn into a remark per lift.
-        self.diary.record(event.kind, event.at)
+        self.diary.record(diary_kind(event.kind, event.detail.get("reason")), event.at)
+        if event.kind == "slept":
+            self._in_background(self.desires.slept(event.detail.get("reason") or "head"))
 
     # ------------------------------------------------------------ the turn
 

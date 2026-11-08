@@ -229,6 +229,24 @@ void Voice::releaseSpeechBuffer() {
   speech_bytes_received_ = 0;
 }
 
+// ---------------------------------------------------------------- small sounds
+
+void Voice::playChime(Chime chime) {
+  if (is_listening_) stopListening();
+  stopSpeaking();
+  switchToSpeaker();
+  const uint8_t kChimeChannel = 1;  // speech plays on channel 0
+  M5.Speaker.setChannelVolume(kChimeChannel, 90);  // soft, under the speaking voice
+  // Two notes each: a channel holds the playing sound and one waiting sound.
+  if (chime == Chime::FallAsleep) {  // falling: G5, C5
+    M5.Speaker.tone(784, 160, kChimeChannel, true);
+    M5.Speaker.tone(523, 300, kChimeChannel, false);
+  } else {  // rising: C5, G5
+    M5.Speaker.tone(523, 120, kChimeChannel, true);
+    M5.Speaker.tone(784, 200, kChimeChannel, false);
+  }
+}
+
 // ---------------------------------------------------------------- I2S port
 
 void Voice::switchToMicrophone() {
