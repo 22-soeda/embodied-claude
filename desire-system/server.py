@@ -22,7 +22,9 @@ from backend import make_default_adapter
 from desire_updater import (
     COMPANION_NAME,
     DESIRE_CONFIGS,
+    PRIORITY,
     SELF_NAME,
+    choose_dominant,
     compute_desires,
     save_desires,
 )
@@ -48,8 +50,61 @@ def load_desires() -> dict[str, Any] | None:
         return None
 
 
+ACT_LEVEL = 0.7  # PetitOnes: act right away on any desire this strong
+
+
+def format_level_desires(data: dict[str, Any]) -> str:
+    """PetitOnes-style listing (a desire file with a priority): strongest first, by level."""
+    desires = data.get("desires", {})
+    dominant = data.get("dominant", "")
+    lines = [f"【いちばん強い欲求】{_label(dominant)} (level: {desires.get(dominant, 0):.3f})", "",
+             f"【欲求レベル】（{ACT_LEVEL} 以上は、ひとつ行動して satisfy_desire で記録する）"]
+    for name in sorted(desires, key=lambda key: -desires[key]):
+        level = desires[name]
+        bar = "█" * int(level * 10) + "░" * (10 - int(level * 10))
+        mark = " ← いま" if level >= ACT_LEVEL else ""
+        lines.append(f"  {_label(name)}: [{bar}] {level:.3f}{mark}")
+    if data.get("updated_at"):
+        lines.append(f"\n更新: {data['updated_at']}")
+    return "\n".join(lines)
+
+
+def _label(name: str) -> str:
+    return DESIRE_CONFIGS[name].label if name in DESIRE_CONFIGS else name
+
+
+def _get_desires_description() -> str:
+    if PRIORITY:
+        each = "; ".join(
+            f"{name} ({cfg.label}){': ' + cfg.description if cfg.description else ''}"
+            for name, cfg in DESIRE_CONFIGS.items()
+        )
+        return (
+            f"Get {SELF_NAME}'s current desire levels (0-1, from how long since each was last met, "
+            f"moved by the body's state). Act on any desire with level >= {ACT_LEVEL}: pick ONE "
+            "bounded action that fits the moment (quiet at night), then call satisfy_desire. "
+            f"Desires: {each}."
+        )
+    return (
+        f"Get {SELF_NAME}'s current desire levels and discomfort (homeostasis). "
+        "Discomfort = distance from set point. "
+        "When discomfort >= 0.5: pick ONE bounded action that fits the "
+        "current context (prefer private/non-interruptive during quiet "
+        "hours), then call satisfy_desire. Do NOT loop more than once "
+        "per tick. Desires bias attention; they are not a command queue. "
+        "browse_curiosity -> WebSearch something interesting; "
+        "look_outside -> use camera to look outside; "
+        f"miss_companion -> talk to {COMPANION_NAME} proactively; "
+        "observe_room -> use camera to observe room; "
+        "identity_coherence -> recall memories to reinforce self-model; "
+        "cognitive_load -> think about or discuss something interesting."
+    )
+
+
 def format_desires(data: dict[str, Any]) -> str:
     """欲求データを読みやすい形式に整形する。"""
+    if PRIORITY:
+        return format_level_desires(data)
     lines = []
     dominant = data.get("dominant", "")
     desires = data.get("desires", {})
@@ -92,20 +147,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="get_desires",
-            description=(
-                f"Get {SELF_NAME}'s current desire levels and discomfort (homeostasis). "
-                "Discomfort = distance from set point. "
-                "When discomfort >= 0.5: pick ONE bounded action that fits the "
-                "current context (prefer private/non-interruptive during quiet "
-                "hours), then call satisfy_desire. Do NOT loop more than once "
-                "per tick. Desires bias attention; they are not a command queue. "
-                "browse_curiosity -> WebSearch something interesting; "
-                "look_outside -> use camera to look outside; "
-                f"miss_companion -> talk to {COMPANION_NAME} proactively; "
-                "observe_room -> use camera to observe room; "
-                "identity_coherence -> recall memories to reinforce self-model; "
-                "cognitive_load -> think about or discuss something interesting."
-            ),
+            description=_get_desires_description(),
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -268,7 +310,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         adjusted_sp = get_allostatic_set_point(desire_name, now)
         discomforts[desire_name] = round(calculate_discomfort(desires[desire_name], adjusted_sp), 3)
 
-        dominant = max(discomforts, key=lambda k: discomforts[k])
+        dominant = choose_dominant(desires, discomforts)
         data["desires"] = desires
         data["discomforts"] = discomforts
         data["dominant"] = dominant

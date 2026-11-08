@@ -39,7 +39,7 @@ DESIRES_PATH = Path.home() / ".claude" / "desires.json"  # desire-system's defau
 UPDATE_INTERVAL_SECS = 5 * 60
 UPDATER_TIMEOUT_SECS = 120
 TALK_RECORD_GAP_SECS = 30 * 60
-STRONG_LEVEL = 0.6  # the threshold of the old timer desires; this strong, it reaches the heartbeat
+STRONG_LEVEL = 0.7  # PetitOnes: "act immediately on any desire with level >= 0.7"
 TALKING = "miss_companion"
 CONTACT_KINDS = {"picked_up", "shaken", "poked"}
 
@@ -110,7 +110,7 @@ class Desires:
         return sorted(levels, key=lambda desire: -desire["level"])
 
     def strong_lines(self) -> list[str]:
-        """'添田と話したい（0.72）' for each desire at or over STRONG_LEVEL."""
+        """'添田に会いたい（0.72）' for each desire at or over STRONG_LEVEL."""
         return [f"{d['label']}（{d['level']:.2f}）" for d in self.levels() if d["level"] >= STRONG_LEVEL]
 
     def write_digest(self, path: Path) -> None:

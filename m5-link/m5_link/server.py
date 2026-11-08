@@ -7,9 +7,11 @@
     POST /api/chat      {"text"}: a conversation turn, as if typed to the body
     POST /api/say       {"text", "mood"?}: speak through the body, no turn
     POST /api/face      {"mood", "ms"?}
+    POST /api/sleep     {"asleep": true|false}: the body sleeps (screen dim, sleeping face) or wakes
     POST /api/snapshot  take a picture; returns {"path"} under captures/
     POST /api/heartbeat run one heartbeat now
     POST /api/diary     {"date"?}: write that day's diary page now (normally 23:50)
+    POST /api/backup    zip the agent's own files and databases now (normally 04:30)
 
 The body needs the token. Everything else is open from this PC (loopback,
 which is how the body MCP calls in) and needs the token from anywhere else.
@@ -87,6 +89,11 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         spoken = await conversation.speak_unprompted(payload.get("text", ""), payload.get("mood"))
         return web.json_response({"spoken": spoken})
 
+    async def sleep_or_wake(request: web.Request) -> web.Response:
+        asleep = bool((await request.json()).get("asleep", True))
+        sent = await body.send({"t": "sleep" if asleep else "wake"})
+        return web.json_response({"sent": sent, "asleep": asleep})
+
     async def face(request: web.Request) -> web.Response:
         payload = await request.json()
         shown = await body.show_face(payload.get("mood", "neutral"), int(payload.get("ms", 5000)))
@@ -116,6 +123,10 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         day = date.fromisoformat(payload["date"]) if payload.get("date") else None
         return web.json_response({"page": await nightly.write_diary(day)})
 
+    async def back_up(_: web.Request) -> web.Response:
+        path = await nightly.back_up()
+        return web.json_response({"path": str(path) if path else None})
+
     async def run_heartbeat(_: web.Request) -> web.Response:
         if heartbeat.is_running:
             return web.json_response({"started": False, "reason": "already running"})
@@ -133,9 +144,11 @@ def build_app(config: LinkConfig, body: Body, conversation: Conversation, heartb
         web.post("/api/chat", chat),
         web.post("/api/say", say),
         web.post("/api/face", face),
+        web.post("/api/sleep", sleep_or_wake),
         web.post("/api/snapshot", snapshot),
         web.get("/captures/{name}", capture_file),
         web.post("/api/heartbeat", run_heartbeat),
         web.post("/api/diary", write_diary),
+        web.post("/api/backup", back_up),
     ])
     return app

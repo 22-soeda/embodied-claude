@@ -157,6 +157,7 @@ class DesireConfig:
     set_point: float            # 平衡値（ここが「心地よい」レベル）
     keywords: list[str]         # ChromaDB検索キーワード
     label: str                  # 日本語ラベル
+    description: str = ""       # 何の気持ちか（設定ファイルの欲求だけ。get_desires の説明に出す）
 
 
 DESIRE_CONFIGS: dict[str, DesireConfig] = {
@@ -219,9 +220,16 @@ DESIRE_CONFIGS: dict[str, DesireConfig] = {
 #   {"desires": {"miss_companion": {"label": "{companion}と話したい",
 #                                   "satisfaction_hours": 3, "set_point": 0.3,
 #                                   "keywords": ["{companion}と話した", ...]}},
-#    "body_effects": [ ... 下の「体の状態の効き」 ... ]}
+#    "body_effects": [ ... 下の「体の状態の効き」 ... ],
+#    "cross_effects": [{"when": {"desire": "want_to_sleep", "op": ">", "value": 0.8},
+#                       "effects": {"browse_curiosity": {"multiply": 0.5}}}],
+#    "priority": ["want_to_sleep", "miss_companion", ...]}
 #
-# 欲求の名前は既定と同じものを使う。individual-kernel の allostasis と
+# cross_effects と priority も PetitOnes のとおり。ある欲求がしきい値を越えたら
+# ほかの欲求を動かし、主な欲求（dominant）は「いちばん強いもの、同じなら
+# priority の順」で決める（ファイルに priority が無ければ、これまでどおり不快度で）。
+#
+# 欲求の名前は、既定にあるものは同じ名前を使う。individual-kernel の allostasis と
 # interaction-orchestrator が名前で読むので。{companion} {self} {pronoun} は
 # COMPANION_NAME / SELF_NAME / SELF_PRONOUN に置き換わる。読めないファイルは
 # 標準エラーに一行出して既定の欲求に戻る（体の感覚ひとつで止まらないように）。
@@ -235,8 +243,18 @@ def _fill_names(text: str) -> str:
     )
 
 
-def load_desire_file(path: Path) -> tuple[dict[str, DesireConfig], list[dict[str, Any]]]:
-    """Read a desire config file: (desires by name, body effects)."""
+@dataclass(frozen=True)
+class DesireFile:
+    """What a DESIRE_CONFIG_FILE holds."""
+
+    desires: dict[str, DesireConfig]
+    body_effects: list[dict[str, Any]]
+    cross_effects: list[dict[str, Any]]
+    priority: list[str]
+
+
+def load_desire_file(path: Path) -> DesireFile:
+    """Read a desire config file."""
     raw = json.loads(path.read_text(encoding="utf-8"))
     configs = {
         name: DesireConfig(
@@ -244,19 +262,31 @@ def load_desire_file(path: Path) -> tuple[dict[str, DesireConfig], list[dict[str
             set_point=float(spec.get("set_point", 0.3)),
             keywords=[_fill_names(keyword) for keyword in spec.get("keywords", [])],
             label=_fill_names(spec.get("label", name)),
+            description=_fill_names(spec.get("description", "")),
         )
         for name, spec in raw.get("desires", {}).items()
     }
     if not configs:
         raise ValueError("no desires in the file")
-    return configs, list(raw.get("body_effects", []))
+    return DesireFile(
+        desires=configs,
+        body_effects=list(raw.get("body_effects", [])),
+        cross_effects=list(raw.get("cross_effects", [])),
+        priority=[name for name in raw.get("priority", []) if name in configs],
+    )
 
 
 BODY_EFFECTS: list[dict[str, Any]] = []
+CROSS_EFFECTS: list[dict[str, Any]] = []
+PRIORITY: list[str] = []  # empty: the dominant desire is the most uncomfortable one
 DESIRE_CONFIG_FILE = os.getenv("DESIRE_CONFIG_FILE", "").strip()
 if DESIRE_CONFIG_FILE:
     try:
-        DESIRE_CONFIGS, BODY_EFFECTS = load_desire_file(Path(DESIRE_CONFIG_FILE).expanduser())
+        _desire_file = load_desire_file(Path(DESIRE_CONFIG_FILE).expanduser())
+        DESIRE_CONFIGS = _desire_file.desires
+        BODY_EFFECTS = _desire_file.body_effects
+        CROSS_EFFECTS = _desire_file.cross_effects
+        PRIORITY = _desire_file.priority
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(
             f"[desire-updater] DESIRE_CONFIG_FILE={DESIRE_CONFIG_FILE} を読めなかったので"
@@ -318,18 +348,61 @@ def apply_body_effects(
     if not body:
         return adjusted
     for effect in effects:
-        if not body_effect_applies(effect, body, now_ts):
-            continue
-        for target, change in effect.get("effects", {}).items():
-            names = list(adjusted) if target == "*" else [target] if target in adjusted else []
-            for name in names:
-                value = adjusted[name]
-                if "multiply" in change:
-                    value *= float(change["multiply"])
-                if "add" in change:
-                    value += float(change["add"])
-                adjusted[name] = round(max(0.0, min(1.0, value)), 3)
+        if body_effect_applies(effect, body, now_ts):
+            _apply_changes(adjusted, effect.get("effects", {}))
     return adjusted
+
+
+_COMPARISONS = {
+    ">": lambda level, value: level > value,
+    ">=": lambda level, value: level >= value,
+    "<": lambda level, value: level < value,
+    "<=": lambda level, value: level <= value,
+}
+
+
+def apply_cross_effects(
+    levels: dict[str, float], effects: list[dict[str, Any]]
+) -> dict[str, float]:
+    """When one desire passes a threshold, move others (PetitOnes' cross_effects).
+
+    {"when": {"desire": "want_to_sleep", "op": ">", "value": 0.8},
+     "effects": {"browse_curiosity": {"multiply": 0.5}}}
+    """
+    adjusted = dict(levels)
+    for effect in effects:
+        when = effect.get("when", {})
+        name = when.get("desire", "")
+        compare = _COMPARISONS.get(when.get("op", ">"))
+        if name in adjusted and compare and compare(adjusted[name], float(when.get("value", 0))):
+            _apply_changes(adjusted, effect.get("effects", {}))
+    return adjusted
+
+
+def _apply_changes(levels: dict[str, float], changes: dict[str, dict[str, float]]) -> None:
+    """{"*": {"multiply": 0.5}, "want_to_sleep": {"add": 0.5}}, in order, kept within 0..1."""
+    for target, change in changes.items():
+        names = list(levels) if target == "*" else [target] if target in levels else []
+        for name in names:
+            value = levels[name]
+            if "multiply" in change:
+                value *= float(change["multiply"])
+            if "add" in change:
+                value += float(change["add"])
+            levels[name] = round(max(0.0, min(1.0, value)), 3)
+
+
+def choose_dominant(desires: dict[str, float], discomforts: dict[str, float]) -> str:
+    """With a priority (PetitOnes): the strongest desire, ties broken by priority.
+    Without: the most uncomfortable one, as desire-system always did."""
+    if not PRIORITY:
+        return max(discomforts, key=lambda name: discomforts[name])
+
+    def rank(name: str) -> tuple[float, int]:
+        place = PRIORITY.index(name) if name in PRIORITY else len(PRIORITY)
+        return (-desires[name], place)
+
+    return min(desires, key=rank)
 
 
 # 後方互換: 旧モジュールが参照していた変数
@@ -482,14 +555,15 @@ def compute_desires(
     if BODY_EFFECTS:
         body = body if body is not None else load_body_state(now_ts)
         desires = apply_body_effects(desires, body, BODY_EFFECTS, now_ts)
+    if CROSS_EFFECTS:
+        desires = apply_cross_effects(desires, CROSS_EFFECTS)
 
     for desire_name, level in desires.items():
         # アロスタシス: 時間帯でセットポイントを調整
         adjusted_sp = get_allostatic_set_point(desire_name, now)
         discomforts[desire_name] = round(calculate_discomfort(level, adjusted_sp), 3)
 
-    # 最も不快度が高いものを dominant に
-    dominant = max(discomforts, key=lambda k: discomforts[k])
+    dominant = choose_dominant(desires, discomforts)
 
     return DesireState(
         updated_at=now.isoformat(),

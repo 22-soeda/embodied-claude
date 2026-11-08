@@ -259,8 +259,10 @@ else
 fi
 
 # --- 欲望システム（内部衝動） ---
+# 体の欲求（m5-link が DESIRE_DIGEST_FILE を渡す）があるときは、タイマーの欲望は使わない。
+# PetitOnes の欲求は記憶と体から計算するものだけで、タイマーは無い。
 DESIRE_PROMPT=""
-if [ "$SKIP_SCHEDULE" = false ]; then
+if [ "$SKIP_SCHEDULE" = false ] && [ -z "${DESIRE_DIGEST_FILE:-}" ]; then
   DESIRE_STDERR=$(mktemp)
   DESIRE_PROMPT=$(bun run "$SCRIPT_DIR/scripts/desire-tick.ts" tick 2>"$DESIRE_STDERR")
   if [ -s "$DESIRE_STDERR" ]; then
@@ -337,7 +339,7 @@ if [ -n "${DESIRE_DIGEST_FILE:-}" ] && [ -s "$DESIRE_DIGEST_FILE" ]; then
   GROUNDED_DESIRE_SECTION="
 ## 欲求（記憶と体から）
 $(cat "$DESIRE_DIGEST_FILE")
-（いま強くなっている欲求。1 に近いほど強い。従うかどうかは自分の判断。満たせたら desire-system の satisfy_desire で記録する。やらなければ下がらない。）
+（0.7 以上の欲求。いまのところ、ひとつ行動する。夜は静かなことを選ぶ。やったら desire-system の satisfy_desire で記録する。やらなければ下がらない。ほかの欲求は get_desires で見られる。）
 "
   echo "[欲求] $(tr '\n' ' ' < "$DESIRE_DIGEST_FILE")" >> "$LOG_FILE"
 fi

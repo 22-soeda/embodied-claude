@@ -1,46 +1,69 @@
 {
-  "about": "Desires of the M5Stack CoreS3 body, read by desire-system through DESIRE_CONFIG_FILE (see desire-system/desire_updater.py). Names are desire-system's own, because individual-kernel and interaction-orchestrator read them. {companion} becomes COMPANION_NAME. Left out: look_outside (the body cannot see out of a window), browse_curiosity (the heartbeat has no web search) and identity_coherence (its set point of 0.9 makes it most uncomfortable right after a recall).",
+  "about": "Desires of the M5Stack CoreS3 body, read by desire-system through DESIRE_CONFIG_FILE (see desire-system/desire_updater.py). The six basic desires, hours, keywords, battery effect and priority are PetitOnes' (petit-textbook petit/templates/config/desire_config.json, Apache-2.0); a character may change them as it grows, together with the person it lives with. Where desire-system already had the same desire its name is kept (observe_room for PetitOnes' observe_surroundings), because individual-kernel and interaction-orchestrator read names. {companion} becomes COMPANION_NAME. Added here: keywords for this body (talking through it, its camera) and a recent touch halving miss_companion.",
   "desires": {
     "miss_companion": {
-      "label": "{companion}と話したい",
-      "satisfaction_hours": 3.0,
-      "set_point": 0.3,
+      "label": "{companion}に会いたい",
+      "description": "一緒に暮らす人と話したい、一緒にいたい気持ち",
+      "satisfaction_hours": 4.0,
       "keywords": [
-        "{companion}と話した",
-        "{companion}が話しかけてくれた",
-        "{companion}に話しかけた",
-        "{companion}に伝えた",
-        "{companion}の顔を見た",
-        "{companion}がいた"
-      ],
-      "why": "m5-link records a conversation through the body as the first keyword, so talking lowers it"
+        "{companion}と話した", "{companion}に伝えた", "{companion}と会話", "{companion}と話す",
+        "{companion}が来た", "{companion}がいた",
+        "{companion}が話しかけてくれた", "{companion}に話しかけた", "{companion}の顔を見た"
+      ]
     },
     "observe_room": {
-      "label": "部屋を見たい",
+      "label": "周りを見たい",
+      "description": "カメラで周囲を観察したい",
       "satisfaction_hours": 2.0,
       "set_point": 0.2,
-      "keywords": ["部屋を見た", "部屋を観察した", "カメラで部屋を", "体のカメラで見た", "look_around"],
-      "why": "the body's camera (body MCP see); two hours, not the ten minutes of a pan-tilt camera"
+      "keywords": ["take_snapshot", "snapshot", "撮影した", "カメラで", "部屋を見た", "体のカメラで見た"]
     },
-    "cognitive_load": {
-      "label": "考えごとをしたい",
+    "want_to_write": {
+      "label": "書きたい・作りたい",
+      "description": "詩や日記、ノートなど何か書きたい気持ち",
+      "satisfaction_hours": 8.0,
+      "keywords": ["書いた", "ノートに", "詩を", "日記に"]
+    },
+    "browse_curiosity": {
+      "label": "何か調べたい",
+      "description": "知的好奇心。新しいことを知りたい衝動",
+      "satisfaction_hours": 6.0,
+      "keywords": ["検索した", "調査した", "調べた", "読んだ"]
+    },
+    "want_to_rest": {
+      "label": "休みたい",
+      "description": "何もしないでゆっくりしたい",
       "satisfaction_hours": 3.0,
-      "set_point": 0.3,
-      "keywords": ["考えた", "振り返った", "まとめた", "書き残した", "読んだ"]
+      "keywords": ["休んだ", "ゆっくり", "のんびり"]
+    },
+    "want_to_sleep": {
+      "label": "眠りたい",
+      "description": "深夜・疲れたときに眠りたい。体の sleep で画面を落として眠る",
+      "satisfaction_hours": 8.0,
+      "keywords": ["おやすみ", "スリープ", "sleep"]
     }
   },
   "body_effects": [
     {
       "when": "battery_low",
       "below": 20,
-      "effects": {"*": {"multiply": 0.5}},
-      "why": "with little battery left, wanting anything weakens (PetitOnes' example)"
+      "effects": {"want_to_sleep": {"add": 0.5}, "*": {"multiply": 0.5}},
+      "why": "電池が減ると眠くなり、他の欲求が下がる（PetitOnes のとおり。充電中は除く）"
     },
     {
       "when": "contact_within",
       "minutes": 20,
       "effects": {"miss_companion": {"multiply": 0.5}},
-      "why": "being picked up or touched just now half meets wanting to be with someone"
+      "why": "持ち上げられたり触れられたりしたばかりなら、会いたい気持ちは半分満たされている"
     }
+  ],
+  "cross_effects": [],
+  "priority": [
+    "want_to_sleep",
+    "miss_companion",
+    "observe_room",
+    "want_to_write",
+    "want_to_rest",
+    "browse_curiosity"
   ]
 }

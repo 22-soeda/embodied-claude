@@ -69,6 +69,26 @@ def show_face(mood: str, seconds: int = 5) -> str:
 
 
 @mcp.tool()
+def sleep() -> str:
+    """Go to sleep: the body's screen dims to a sleeping face and it does not listen. A tap
+    only lets it peek for a few seconds (and is noted as being poked); it stays asleep until
+    wake(), or until m5-link wakes it in the morning ([nightly] wake_at, 07:00 by default).
+
+    For the night, or when the desire to sleep (want_to_sleep) is strong. Before sleeping,
+    write 「おやすみ、スリープした」 to memory, so that on waking it is clear it had slept.
+    """
+    result = _call("POST", "/api/sleep", {"asleep": True})
+    return "asleep" if result.get("sent") else f"not asleep: {result.get('error', 'body not connected')}"
+
+
+@mcp.tool()
+def wake() -> str:
+    """Wake the body from sleep: normal face and brightness."""
+    result = _call("POST", "/api/sleep", {"asleep": False})
+    return "awake" if result.get("sent") else f"not woken: {result.get('error', 'body not connected')}"
+
+
+@mcp.tool()
 def see() -> list:
     """Take a picture with the body's camera (a small 320x240 camera under its screen) and look at it.
 

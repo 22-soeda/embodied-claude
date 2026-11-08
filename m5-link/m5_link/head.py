@@ -48,7 +48,9 @@ MOODS = ("happy", "sad", "surprised", "thinking", "sleepy", "love", "neutral")
 MOOD_TAG = re.compile(r"^\s*\[(" + "|".join(MOODS) + r")\]\s*")
 SILENT_TAG = "[silent]"
 
-BUILTIN_TOOLS = ["Read"]  # Read is for looking at "みてみて" pictures
+# Read: the "みてみて" pictures and its own reflections. WebSearch / WebFetch: from
+# outside, as PetitOnes have them (books go through the reader MCP server).
+BUILTIN_TOOLS = ["Read", "WebSearch", "WebFetch"]
 # MCP servers of this repository the conversation does not load: the kernel
 # only makes sense together with the hooks, which this session leaves out.
 SKIPPED_MCP_SERVERS = {"individual-kernel"}
@@ -81,6 +83,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
 
 道具
 - 会話中は body の say を使わない。返事がそのまま声になるので二重になる。
+- 調べものは WebSearch と WebFetch、本や長い文章は reader の read_page で 1 ページずつ。返事が遅くなるので、会話中は頼まれたときか、どうしても要るときだけにする。
 
 SOUL.md
 {soul}

@@ -9,6 +9,12 @@ kept. Then diary_summary.md - the newest page in full, and the first line of
 the seven before it - is rebuilt; the heartbeat and the conversation head read
 it every time, so a new day's session knows the last few days.
 
+Backup: at 04:30, after the sleep, the agent's own files and databases are zipped
+into [backup] dir (backup.py).
+
+Morning: at 07:00 the body is woken, in case the head put it to sleep with the
+body MCP's sleep() and did not wake it.
+
 Sleep: memory-mcp's `memory_mcp.sleep` (ported from PetitOnes/m5-petit-memory)
 merges near-duplicate memories, lowers the importance of fading ones and
 forgets trivial old ones, never touching important, emotional or first-time
@@ -30,8 +36,10 @@ from pathlib import Path
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
 
+from .body import Body
 from .body_diary import BodyDiary
-from .config import REPO_ROOT, HeadConfig, NightlyConfig
+from .backup import backup_folder, make_backup
+from .config import REPO_ROOT, BackupConfig, HeadConfig, NightlyConfig
 
 log = logging.getLogger(__name__)
 
@@ -57,14 +65,19 @@ DIARY_PROMPT = """\
 
 
 class Nightly:
-    def __init__(self, config: NightlyConfig, head: HeadConfig, body_diary: BodyDiary) -> None:
+    def __init__(self, config: NightlyConfig, head: HeadConfig, body_diary: BodyDiary,
+                 body: Body | None = None, backup: BackupConfig | None = None) -> None:
         self._config = config
+        self._backup = backup or BackupConfig()
         self._head = head
         self._body_diary = body_diary
+        self._body = body
 
     async def run_forever(self) -> None:
         jobs = [(self._config.diary_at, "diary", self.write_diary),
-                (self._config.memory_sleep_at, "memory sleep", self.sleep)]
+                (self._config.memory_sleep_at, "memory sleep", self.sleep),
+                (self._config.wake_at, "body wake", self.wake_body),
+                (self._backup.at if self._backup.dir else "", "backup", self.back_up)]
         await asyncio.gather(*(_every_day_at(at, name, job) for at, name, job in jobs if at))
 
     # ------------------------------------------------------------ diary
@@ -117,6 +130,23 @@ class Nightly:
                 texts += [block.text for block in message.content if isinstance(block, TextBlock)]
         return "".join(texts).strip()
 
+    # ------------------------------------------------------------ backup
+
+    async def back_up(self) -> Path | None:
+        """Zip the agent's own files and databases into [backup] dir (see backup.py)."""
+        destination = backup_folder(self._backup)
+        if destination is None:
+            log.info("no backup folder set ([backup] dir); nothing backed up")
+            return None
+        return await asyncio.to_thread(make_backup, destination, self._backup.keep)
+
+    # ------------------------------------------------------------ morning
+
+    async def wake_body(self) -> None:
+        """Wake the body in the morning, in case the head put it to sleep and did not wake it."""
+        if self._body is not None and await self._body.send({"t": "wake"}):
+            log.info("woke the body for the morning")
+
     # ------------------------------------------------------------ sleep
 
     async def sleep(self) -> dict | None:
@@ -153,8 +183,11 @@ def day_memories(day: date) -> list[str]:
     """The contents of the memories made on ``day`` (local time), oldest first."""
     if not MEMORY_DB_PATH.exists():
         return []
-    with sqlite3.connect(f"file:{MEMORY_DB_PATH}?mode=ro", uri=True) as db:
+    db = sqlite3.connect(f"{MEMORY_DB_PATH.resolve().as_uri()}?mode=ro", uri=True)
+    try:
         rows = db.execute("SELECT timestamp, content FROM memories").fetchall()
+    finally:
+        db.close()
     # Sorted by the moment, not the stored text: "…T03:00+00:00" is noon in Tokyo.
     that_day = sorted(((when, content) for stamp, content in rows
                        if (when := _local_moment(stamp)) is not None and when.date() == day),

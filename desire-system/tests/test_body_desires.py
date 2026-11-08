@@ -44,14 +44,34 @@ def test_a_desire_file_replaces_the_set_and_fills_in_names(tmp_path):
         "desires": {"miss_companion": {"label": "{companion}と話したい", "satisfaction_hours": 3,
                                        "keywords": ["{companion}と話した"]}},
         "body_effects": [BATTERY_LOW],
+        "priority": ["want_to_sleep", "miss_companion"],
     }), encoding="utf-8")
-    configs, effects = load_desire_file(path)
+    loaded = load_desire_file(path)
+    configs = loaded.desires
     companion = desire_updater.COMPANION_NAME
     assert list(configs) == ["miss_companion"]
     assert configs["miss_companion"].label == f"{companion}と話したい"
     assert configs["miss_companion"].keywords == [f"{companion}と話した"]
     assert configs["miss_companion"].set_point == 0.3
-    assert effects == [BATTERY_LOW]
+    assert loaded.body_effects == [BATTERY_LOW]
+    assert loaded.priority == ["miss_companion"]  # names not defined in the file are dropped
+
+
+def test_a_cross_effect_moves_other_desires_past_a_threshold():
+    sleepy = [{"when": {"desire": "want_to_sleep", "op": ">", "value": 0.8},
+               "effects": {"browse_curiosity": {"multiply": 0.5}}}]
+    assert desire_updater.apply_cross_effects(
+        {"want_to_sleep": 0.9, "browse_curiosity": 0.8}, sleepy) == {
+        "want_to_sleep": 0.9, "browse_curiosity": 0.4}
+    assert desire_updater.apply_cross_effects(
+        {"want_to_sleep": 0.5, "browse_curiosity": 0.8}, sleepy)["browse_curiosity"] == 0.8
+
+
+def test_with_a_priority_the_strongest_desire_leads_and_ties_follow_the_order(monkeypatch):
+    monkeypatch.setattr(desire_updater, "PRIORITY", ["want_to_sleep", "miss_companion"])
+    levels = {"miss_companion": 0.9, "want_to_sleep": 0.9, "browse_curiosity": 0.5}
+    discomforts = {"miss_companion": 0.1, "want_to_sleep": 0.1, "browse_curiosity": 0.9}
+    assert desire_updater.choose_dominant(levels, discomforts) == "want_to_sleep"
 
 
 def test_a_low_battery_halves_every_desire():

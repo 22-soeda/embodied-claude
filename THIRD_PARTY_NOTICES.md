@@ -7,11 +7,14 @@ the project that gives small M5Stack bodies to Claude-based characters.
 |---|---|---|---|
 | `memory-mcp/src/memory_mcp/sleep.py`, `SleepConfig` in `config.py`, `SleepStats` in `types.py`, `MemoryStore.merge_memories` in `store.py`, `memory-mcp/tests/test_sleep.py` | PetitOnes/m5-petit-memory (`src/memory_mcp/sleep.py`, `config.py`, `types.py`, `store.py`, `tests/test_sleep.py`) | Apache License 2.0 | ages from timezone-aware timestamps too; deletes with this store's `delete()`; a `memory-sleep` command; tests regrouped, two added |
 | `examples/SOUL_REFLECTIONS.sample.md`, `examples/REFLECTION_INDEX.sample.md`, the routines and folder READMEs in `scripts/windows/configure_v0.py`, the rules on one's own documents in `autonomous-action.sample.sh` | PetitOnes/petit-textbook (`petit/templates/`, `petit/02_jibun.md`) | Apache License 2.0 | names and PetitOnes-specific lines taken out |
+| `scripts/reader_mcp.py` | PetitOnes/petit-ones (`scripts/reader.py`, `scripts/fetch_aozora.py`, `.claude/commands/read.md`) | MIT | an MCP server instead of a command, so the intention gate treats it as reading; a small cache; the reading steps in the tool descriptions |
+| `m5-link/desire-config.json` (the six desires, their hours, keywords, battery effect and priority) | PetitOnes/petit-textbook (`petit/templates/config/desire_config.json`) | Apache License 2.0 | observe_surroundings kept under desire-system's name observe_room; keywords for this body added; a recent touch halves miss_companion |
 | `m5-link/m5_link/nightly.py` (diary page and diary_summary.md) | PetitOnes/petit-ones (`dashboard/generate_diary.py`, `generate_diary_summary` in `dashboard/main.py`) | MIT | what happened to the body that day goes into the prompt; a page the agent wrote itself is kept |
 
-The ideas behind `m5-link/m5_link/body_diary.py` (PetitOnes' experience-daemon)
-and `m5-link/desire-config.json` (m5-petit-desire's desire_config.json) are
-PetitOnes'; no code was copied for them.
+The ideas behind `m5-link/m5_link/body_diary.py` (PetitOnes' experience-daemon),
+the cross effects and priority in `desire-system/desire_updater.py` (m5-petit-desire),
+the body MCP's `sleep`/`wake` (m5-petit-mcp) and `m5-link/m5_link/backup.py`
+(petit-ones' backup_petit.sh) are PetitOnes'; no code was copied for them.
 
 Copyright and notices of the sources:
 

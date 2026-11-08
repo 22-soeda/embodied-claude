@@ -84,7 +84,7 @@
     <section>
       <h2>欲求</h2>
       <div id="desires"></div>
-      <p class="meta">記憶（最後にそれをしてから何時間か）と体の状態から 5 分ごとに計算。0.6 を超えると定期起床に伝わる。</p>
+      <p class="meta">記憶（最後にそれをしてから何時間か）と体の状態から 5 分ごとに計算。0.7 以上は定期起床に伝わる。</p>
     </section>
     <section>
       <h2>最近の出来事</h2>
@@ -180,7 +180,7 @@ async function refresh() {
   const desires = status.desires || [];
   document.getElementById("desires").replaceChildren(...(desires.length ? desires.map(d => {
     const row = document.createElement("div");
-    row.className = `desire${d.level >= 0.6 ? " strong" : ""}`;
+    row.className = `desire${d.level >= 0.7 ? " strong" : ""}`;
     const label = document.createElement("span"); label.textContent = d.label;
     const bar = document.createElement("div"); bar.className = "bar";
     const fill = document.createElement("span"); fill.style.width = `${Math.round(d.level * 100)}%`;

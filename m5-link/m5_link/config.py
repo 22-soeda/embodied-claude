@@ -57,6 +57,14 @@ interval_minutes = 60
 # As PetitOnes does it: a diary page from the day's memories, then the memory sleep.
 diary_at = "23:50"
 memory_sleep_at = "04:05"   # after the conversation session is closed at day_starts_at
+wake_at = "07:00"           # wake the body, in case the head put it to sleep and did not wake it
+
+[backup]
+# The agent's own files and databases, zipped every night. Somewhere off this PC's
+# disk is best, e.g. a OneDrive folder: "~/OneDrive/embodied-claude-backup".
+dir = ""                    # "" to turn off
+at = "04:30"                # after the memory sleep
+keep = 14                   # newest zips kept
 """
 
 
@@ -102,6 +110,14 @@ class HeartbeatConfig:
 class NightlyConfig:
     diary_at: str = "23:50"         # "" to turn off
     memory_sleep_at: str = "04:05"  # "" to turn off
+    wake_at: str = "07:00"          # "" to turn off
+
+
+@dataclass(frozen=True)
+class BackupConfig:
+    dir: str = ""      # "" to turn off
+    at: str = "04:30"
+    keep: int = 14
 
 
 @dataclass(frozen=True)
@@ -112,6 +128,7 @@ class LinkConfig:
     mouth: MouthConfig = field(default_factory=MouthConfig)
     heartbeat: HeartbeatConfig = field(default_factory=HeartbeatConfig)
     nightly: NightlyConfig = field(default_factory=NightlyConfig)
+    backup: BackupConfig = field(default_factory=BackupConfig)
 
 
 def load_config(path: Path = CONFIG_PATH) -> LinkConfig:
@@ -125,4 +142,5 @@ def load_config(path: Path = CONFIG_PATH) -> LinkConfig:
         mouth=MouthConfig(**raw.get("mouth", {})),
         heartbeat=HeartbeatConfig(**raw.get("heartbeat", {})),
         nightly=NightlyConfig(**raw.get("nightly", {})),
+        backup=BackupConfig(**raw.get("backup", {})),
     )

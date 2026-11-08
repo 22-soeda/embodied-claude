@@ -25,6 +25,8 @@ It is safe to re-run: existing files are kept, only missing pieces are added.
    and REFLECTION_INDEX.md from examples/, notes/ and diary/ with a README,
    and the textbook's routines (diary, a summary of the day's talk, reading
    SOUL.md again) added to ROUTINES.md. The heartbeat may edit these.
+7. `.mcp.json`: add the `reader` server (scripts/reader_mcp.py), and let the
+   heartbeat search and fetch the web and read with it, as PetitOnes do.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ import argparse
 import json
 import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -44,6 +47,15 @@ OLD_NOTIFY_SERVER_NAME = "notify"
 NOTIFY_SERVER = {
     "command": "uv",
     "args": ["run", "--no-sync", "python", "desktop-notify-mcp/server.py"],
+}
+
+# Reading from outside: a page or a book, one page at a time, as written (ported
+# from PetitOnes' reader). A uv script with its own dependencies; its tool names
+# contain "read_", so the individual-kernel gate counts them as read-only.
+READER_SERVER_NAME = "reader"
+READER_SERVER = {
+    "command": "uv",
+    "args": ["run", "--script", "scripts/reader_mcp.py"],
 }
 
 # The M5 body, through m5-link (added with --with-body). It runs in m5-link's
@@ -62,6 +74,10 @@ HEARTBEAT_ALLOW = [
     "mcp__sociality",
     "mcp__individual-kernel",
     f"mcp__{NOTIFY_SERVER_NAME}",
+    # From outside, as PetitOnes' heartbeat has them: search, fetch, and reading.
+    "WebSearch",
+    "WebFetch",
+    f"mcp__{READER_SERVER_NAME}",
     "Read",
     "Glob",
     "Grep",
@@ -129,6 +145,20 @@ def read_json(path: Path) -> dict:
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def add_reader_server() -> None:
+    mcp_path = REPO_ROOT / ".mcp.json"
+    config = read_json(mcp_path)
+    servers = config.setdefault("mcpServers", {})
+    if servers.get(READER_SERVER_NAME) == READER_SERVER:
+        print(f"kept      .mcp.json {READER_SERVER_NAME} server")
+    else:
+        servers[READER_SERVER_NAME] = READER_SERVER
+        write_json(mcp_path, config)
+        print(f"added     .mcp.json {READER_SERVER_NAME} server")
+    # The first start installs its dependencies; do it now, not inside an MCP startup timeout.
+    subprocess.run(["uv", "run", "--script", "scripts/reader_mcp.py", "--check"], cwd=REPO_ROOT, check=False)
 
 
 def add_notify_server() -> None:
@@ -329,6 +359,7 @@ def main() -> None:
     args = parser.parse_args()
 
     add_notify_server()
+    add_reader_server()
     with_body = args.with_body and add_body_server()
     update_local_settings(with_body)
 

@@ -94,7 +94,7 @@ async def main() -> None:
     mouth = Mouth(config.mouth)
     head = Head(config.head)
     heartbeat = Heartbeat(config.heartbeat, diary, desires, config.head.companion_name)
-    nightly = Nightly(config.nightly, config.head, diary)
+    nightly = Nightly(config.nightly, config.head, diary, body, config.backup)
     conversation = Conversation(body, ears, head, mouth, diary, desires)
 
     runner = web.AppRunner(build_app(config, body, conversation, heartbeat, nightly, version))
