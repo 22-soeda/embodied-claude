@@ -12,7 +12,7 @@
 | `autonomous-action.sample.sh` | Git Bash で動くように直した。`jq.exe` の CRLF を落とす（落とさないとセッション ID に `\r` が入り、毎回記憶のない新規セッションになる）、`sed -i ''` を BSD/GNU 両対応に、起床のモデルと effort を `HEARTBEAT_MODEL` `HEARTBEAT_EFFORT` で指定できるように |
 | `.claude/settings.json` | `autoMemoryEnabled: false`。Claude Code 自体の自動メモリが有効だと、memory-mcp ではなくそちらに覚えてしまう。あわせてフックの時間切れを延ばした（SessionStart 10→60 秒、PreToolUse 5→15 秒、ほか 10→30 秒）。Windows では `uv run` の起動が遅く、MCP サーバーが一斉に立ち上がる起床直後は SessionStart が 15 秒かかって打ち切られた。すると「このセッションが本人だ」という登録が抜け、意図を登録しても PreToolUse がそれを別人の意図として扱うので、notify も記憶も書き込みも全部止まる |
 | `.gitignore` | `SOUL.md` `TODO.md` `ROUTINES.md` `notes/` `diary/` を追加。公開フォークなので暮らしの中身は push しない |
-| `desktop-notify-mcp/server.py` | 声の代わりの通知。`notify` は外向きの行為として individual-kernel のゲートを通る。`list_recent_notifications` は読むだけ |
+| `desktop-notify-mcp/server.py` | 声の代わりの通知。MCP サーバー名は `desktop`。`notify` は外向きの行為として individual-kernel のゲートを通る。`list_recent_notifications` は読むだけ。サーバー名を `notify` にすると道具の正式名が全部 `mcp__notify__…` になり、ゲートが読むだけの道具まで外向きと判定する（2026-11-08 に一度そうなっていた） |
 | `scripts/windows/configure_v0.py` | 機械ごとの設定（Git に入らないもの）をまとめて作る |
 | `scripts/windows/register-heartbeat.ps1` | cron の代わりにタスクスケジューラへ登録する |
 

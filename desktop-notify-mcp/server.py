@@ -5,13 +5,17 @@ The only way to reach the person at this PC is a toast in the corner of the
 screen, which stays in the Windows notification centre until it is dismissed.
 
 Tool names matter to the individual-kernel gate (see "Adding a server" in
-docs/setup.md):
+docs/setup.md). The gate sees the full name, `mcp__<server>__<tool>`, and
+checks the outward fragments first, so the server must not be called "notify":
+`mcp__notify__list_recent_notifications` contains `__notify` and would be gated
+like a send. With the server named "desktop":
 
-- `notify` contains `__notify`, so it is an outward act. The PreToolUse hook
-  lets it through only after a matching `propose_field_action`, and the
-  boundary adapter treats it like a nudge.
-- `list_recent_notifications` contains `__list_`, so it is read-only and can be
-  called freely, e.g. to avoid saying the same thing twice.
+- `mcp__desktop__notify` contains `__notify`, so it is an outward act. The
+  PreToolUse hook lets it through only after a matching `propose_field_action`,
+  and the boundary adapter treats it like a nudge.
+- `mcp__desktop__list_recent_notifications` contains `__list_` and no outward
+  fragment, so it is read-only and can be called freely, e.g. to avoid saying
+  the same thing twice.
 
 Run from the repository root (Claude Code starts MCP servers there):
 
@@ -57,7 +61,7 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 
 CREATE_NO_WINDOW = 0x08000000
 
-mcp = FastMCP("notify")
+mcp = FastMCP("desktop")
 
 
 def show_toast(title: str, message: str) -> None:

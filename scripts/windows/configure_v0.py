@@ -7,9 +7,10 @@ Run after `scripts\\setup.cmd --profile core`, from the repository root:
 Everything it touches is ignored by Git, so a fresh clone needs it again.
 It is safe to re-run: existing files are kept, only missing pieces are added.
 
-1. `.mcp.json`: add the `notify` server (desktop-notify-mcp). Setup does not
-   keep unknown servers, so re-run this after every setup run.
-2. `.claude/settings.local.json`: approve `notify` for headless runs, and set
+1. `.mcp.json`: add the `desktop` server (desktop-notify-mcp). Setup does not
+   keep unknown servers, so re-run this after every setup run. An entry from
+   before the rename, under the name `notify`, is removed.
+2. `.claude/settings.local.json`: approve `desktop` for headless runs, and set
    `permissions.allow`, which autonomous-action.sh turns into --allowedTools.
 3. Copy the templates that are still missing: schedule.conf, desires.conf,
    SOUL.md, TODO.md, ROUTINES.md, autonomous-action.sh.
@@ -28,6 +29,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Not "notify": the gate would then read every tool of this server as outward,
+# the read-only list_recent_notifications included (see desktop-notify-mcp).
+NOTIFY_SERVER_NAME = "desktop"
+OLD_NOTIFY_SERVER_NAME = "notify"
 NOTIFY_SERVER = {
     "command": "uv",
     "args": ["run", "--no-sync", "python", "desktop-notify-mcp/server.py"],
@@ -40,7 +45,7 @@ HEARTBEAT_ALLOW = [
     "mcp__desire-system",
     "mcp__sociality",
     "mcp__individual-kernel",
-    "mcp__notify",
+    f"mcp__{NOTIFY_SERVER_NAME}",
     "Read",
     "Glob",
     "Grep",
@@ -85,12 +90,16 @@ def add_notify_server() -> None:
         raise SystemExit(".mcp.json is missing: run scripts\\setup.cmd --profile core first")
     config = read_json(mcp_path)
     servers = config.setdefault("mcpServers", {})
-    if servers.get("notify") == NOTIFY_SERVER:
-        print("kept      .mcp.json notify server")
+    removed_old = servers.pop(OLD_NOTIFY_SERVER_NAME, None) is not None
+    if servers.get(NOTIFY_SERVER_NAME) == NOTIFY_SERVER and not removed_old:
+        print(f"kept      .mcp.json {NOTIFY_SERVER_NAME} server")
         return
-    servers["notify"] = NOTIFY_SERVER
+    servers[NOTIFY_SERVER_NAME] = NOTIFY_SERVER
     write_json(mcp_path, config)
-    print("added     .mcp.json notify server")
+    if removed_old:
+        print(f"renamed   .mcp.json {OLD_NOTIFY_SERVER_NAME} server -> {NOTIFY_SERVER_NAME}")
+    else:
+        print(f"added     .mcp.json {NOTIFY_SERVER_NAME} server")
 
 
 def update_local_settings() -> None:
@@ -98,16 +107,21 @@ def update_local_settings() -> None:
     settings = read_json(settings_path)
 
     enabled = settings.setdefault("enabledMcpjsonServers", [])
-    if "notify" not in enabled:
-        enabled.append("notify")
+    if OLD_NOTIFY_SERVER_NAME in enabled:
+        enabled.remove(OLD_NOTIFY_SERVER_NAME)
+    if NOTIFY_SERVER_NAME not in enabled:
+        enabled.append(NOTIFY_SERVER_NAME)
 
     allow = settings.setdefault("permissions", {}).setdefault("allow", [])
+    old_rule = f"mcp__{OLD_NOTIFY_SERVER_NAME}"
+    if old_rule in allow:
+        allow.remove(old_rule)
     for rule in HEARTBEAT_ALLOW:
         if rule not in allow:
             allow.append(rule)
 
     write_json(settings_path, settings)
-    print("updated   .claude/settings.local.json (notify approval, permissions.allow)")
+    print(f"updated   .claude/settings.local.json ({NOTIFY_SERVER_NAME} approval, permissions.allow)")
 
 
 def copy_if_missing(template: str, target: str) -> bool:
