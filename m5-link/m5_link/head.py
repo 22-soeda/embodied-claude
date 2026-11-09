@@ -47,6 +47,8 @@ SESSION_STATE_PATH = STATE_DIR / "head-session.json"
 MOODS = ("happy", "sad", "surprised", "thinking", "sleepy", "love", "neutral")
 MOOD_TAG = re.compile(r"^\s*\[(" + "|".join(MOODS) + r")\]\s*")
 SILENT_TAG = "[silent]"
+# <br>, <br/>, </br>: the head sometimes ends a reply with one, and the voice read it out (2026-11-09).
+LINE_BREAK_TAG = re.compile(r"<\s*/?\s*br\s*/?\s*>", re.IGNORECASE)
 
 # Read: the "みてみて" pictures and its own reflections. WebSearch / WebFetch: from
 # outside, as PetitOnes have them (books go through the reader MCP server).
@@ -127,7 +129,7 @@ class SessionState:
 
 def parse_reply(raw: str) -> HeadReply:
     """'[happy] おかえり！' -> HeadReply(text='おかえり！', mood='happy')"""
-    text = raw.strip()
+    text = LINE_BREAK_TAG.sub(" ", raw).strip()
     if text == SILENT_TAG or not text:
         return HeadReply(is_silent=True)
     match = MOOD_TAG.match(text)
