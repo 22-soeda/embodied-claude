@@ -39,7 +39,7 @@ from claude_agent_sdk import (
     TextBlock,
 )
 
-from .config import REPO_ROOT, STATE_DIR, HeadConfig
+from .config import MCP_STARTUP_TIMEOUT_MS, REPO_ROOT, STATE_DIR, HeadConfig
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ SKIPPED_MCP_SERVERS = {"individual-kernel"}
 # A context bigger than this at start means something unexpected was loaded
 # (on 2026-11-08 the claude.ai connectors put 173k tokens there).
 CONTEXT_WARNING_TOKENS = 60_000
-MCP_STARTUP_WAIT_SECS = 90
+MCP_STARTUP_WAIT_SECS = 130  # a little past MCP_STARTUP_TIMEOUT_MS, to see how each server ended up
 
 SYSTEM_PROMPT_TEMPLATE = """\
 あなたは M5Stack の体を持つ存在で、いま体を通して{companion}と話している。下の SOUL.md があなた自身。
@@ -263,6 +263,7 @@ class Head:
                 # Drive...) load automatically: ~200 tools, about 170k tokens on
                 # every turn. The body needs none of them.
                 "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+                "MCP_TIMEOUT": MCP_STARTUP_TIMEOUT_MS,
             },
             resume=state.session_id,
             cli_path=shutil.which("claude"),

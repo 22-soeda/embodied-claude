@@ -17,6 +17,11 @@ REPO_ROOT = M5_LINK_DIR.parent
 CONFIG_PATH = M5_LINK_DIR / "m5-link.toml"
 STATE_DIR = M5_LINK_DIR / "state"
 
+# How long Claude Code waits for an MCP server to start (its MCP_TIMEOUT; default
+# 30 s). memory-mcp loads its embedding model before it answers, usually in ~10 s;
+# at 04:00 on 2026-11-09 it took over 30 s and the new head had no memory until m5-link restarted.
+MCP_STARTUP_TIMEOUT_MS = "120000"
+
 DEFAULT_CONFIG_TEXT = """\
 # m5-link settings. This file is ignored by Git: it holds the body's token.
 

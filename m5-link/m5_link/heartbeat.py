@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .body_diary import BodyDiary
-from .config import REPO_ROOT, STATE_DIR, HeartbeatConfig
+from .config import MCP_STARTUP_TIMEOUT_MS, REPO_ROOT, STATE_DIR, HeartbeatConfig
 from .desires import Desires
 
 log = logging.getLogger(__name__)
@@ -139,4 +139,5 @@ def _heartbeat_environment() -> dict[str, str]:
     """
     environment = {key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")}
     environment["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false"
+    environment["MCP_TIMEOUT"] = MCP_STARTUP_TIMEOUT_MS
     return environment
