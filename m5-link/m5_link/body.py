@@ -107,6 +107,7 @@ class Body:
             return False
         self._speech_done.clear()
         self.is_speaking = True
+        started = time.monotonic()
         async with self._send_lock:
             await self._socket.send_json(
                 {"t": "speak_start", "bytes": len(pcm), "rate": SAMPLE_RATE, "text": text}
@@ -114,10 +115,16 @@ class Body:
             for start in range(0, len(pcm), SPEECH_CHUNK_BYTES):
                 await self._socket.send_bytes(bytes([AUDIO]) + pcm[start : start + SPEECH_CHUNK_BYTES])
             await self._socket.send_json({"t": "speak_end"})
+        # The caption shows at speak_start and the sound starts after speak_end,
+        # so the sending time is the gap between the two the person sees.
+        sent = time.monotonic()
+        playback_seconds = len(pcm) / 2 / SAMPLE_RATE
+        log.info("speech sent: %d KB (%.1f s of sound) in %.1f s", len(pcm) // 1024, playback_seconds, sent - started)
         if wait:
-            playback_seconds = len(pcm) / 2 / SAMPLE_RATE
             try:
                 await asyncio.wait_for(self._speech_done.wait(), timeout=playback_seconds + 10)
+                log.info("speech played: %.1f s from the last byte to the body saying it is done",
+                         time.monotonic() - sent)
             except TimeoutError:
                 log.warning("the body did not report the end of speech")
         self.is_speaking = False

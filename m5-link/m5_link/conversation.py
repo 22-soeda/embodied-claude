@@ -141,7 +141,9 @@ class Conversation:
             await self.body.send({"t": "caption", "text": text, "ms": 8000})
             await self.body.set_thinking(False)
             return True
+        started = time.monotonic()
         pcm = await self.mouth.synthesize(text)
+        log.info("speech synthesized: %d characters in %.1f s", len(text), time.monotonic() - started)
         return await self.body.speak(pcm, text)
 
     async def speak_unprompted(self, text: str, mood: str | None = None) -> bool:
