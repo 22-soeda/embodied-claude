@@ -81,8 +81,14 @@ void Face::setStatusBadge(const char* text) {
 }
 
 void Face::showCaption(const String& text, uint32_t duration_ms) {
+  if (text != caption_) caption_wrapped_ = false;
   caption_ = text;
   caption_until_ms_ = millis() + duration_ms;
+  caption_progress_ = 0;
+}
+
+void Face::setCaptionProgress(float progress) {
+  caption_progress_ = constrain(progress, 0.0f, 1.0f);
 }
 
 void Face::setAsleep(bool asleep) {
@@ -308,26 +314,52 @@ void Face::drawCaption() {
                   rgbTo565(0xF4F4F4));
   canvas.setFont(&fonts::lgfxJapanGothic_16);
   canvas.setTextColor(caption_color_);
+  if (!caption_wrapped_) wrapCaption(max_width);
+  const int line_count = static_cast<int>(caption_lines_.size());
 
-  // Wrap by measured width, one UTF-8 character at a time: Japanese has no
-  // spaces to break on. Text past the third line is dropped.
+  // The line holding the character the voice has reached...
+  size_t total_chars = 0;
+  for (size_t chars : caption_line_chars_) total_chars += chars;
+  const size_t reached = static_cast<size_t>(caption_progress_ * total_chars);
+  int current_line = 0;
+  for (size_t passed = 0; current_line < line_count - 1; ++current_line) {
+    passed += caption_line_chars_[current_line];
+    if (passed > reached) break;
+  }
+  // ...is shown second, with the line before it above; at the end, the last lines.
+  const int first_line = constrain(current_line - 1, 0, max(0, line_count - kMaxLines));
+  for (int row = 0; row < kMaxLines && first_line + row < line_count; ++row) {
+    canvas.drawString(caption_lines_[first_line + row], kMarginX, kCaptionTop + 6 + row * kLineHeight);
+  }
+}
+
+// Wraps by measured width, one UTF-8 character at a time: Japanese has no
+// spaces to break on. Done once per caption, not every frame.
+void Face::wrapCaption(int max_width) {
+  caption_lines_.clear();
+  caption_line_chars_.clear();
   String line;
-  int line_index = 0;
-  for (size_t i = 0; i < caption_.length() && line_index < kMaxLines;) {
+  size_t line_chars = 0;
+  for (size_t i = 0; i < caption_.length();) {
     size_t char_end = i + 1;
     while (char_end < caption_.length() && (caption_[char_end] & 0xC0) == 0x80) ++char_end;
     const String next_char = caption_.substring(i, char_end);
     i = char_end;
 
     if (next_char == "\n" || canvas.textWidth(line + next_char) > max_width) {
-      canvas.drawString(line, kMarginX, kCaptionTop + 6 + line_index * kLineHeight);
-      ++line_index;
-      line = next_char == "\n" ? "" : next_char;
+      caption_lines_.push_back(line);
+      caption_line_chars_.push_back(line_chars);
+      const bool is_break = next_char == "\n";
+      line = is_break ? "" : next_char;
+      line_chars = is_break ? 0 : 1;
     } else {
       line += next_char;
+      ++line_chars;
     }
   }
-  if (line_index < kMaxLines && line.length() > 0) {
-    canvas.drawString(line, kMarginX, kCaptionTop + 6 + line_index * kLineHeight);
+  if (line.length() > 0) {
+    caption_lines_.push_back(line);
+    caption_line_chars_.push_back(line_chars);
   }
+  caption_wrapped_ = true;
 }

@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include <vector>
+
 // The face drawn on the 320x240 screen. Everything is drawn procedurally into
 // one sprite and pushed once per frame, so nothing flickers.
 //
@@ -31,6 +33,10 @@ class Face {
   void setListeningLevel(float level);  // 0..1, while listening
   void setStatusBadge(const char* text);  // nullptr clears it
   void showCaption(const String& text, uint32_t duration_ms);
+  // How far the voice has got through the caption, 0..1. The caption shows
+  // three lines; a longer one moves on a line at a time, keeping the line
+  // being said second (character count stands in for speaking time).
+  void setCaptionProgress(float progress);
   // Asleep: the eyes close over kFallAsleepMs, then a sleeping face at
   // kAsleepBrightness. Awake again: the eyes open with a blink.
   void setAsleep(bool asleep);
@@ -52,6 +58,7 @@ class Face {
   void drawListeningBar();
   void drawBadge();
   void drawCaption();
+  void wrapCaption(int max_width);
   Mood currentMood() const;
   float eyesClosing() const;  // 0 = open, 1 = closed, while falling asleep
   void applyBrightness();
@@ -73,6 +80,10 @@ class Face {
   const char* badge_ = nullptr;
   String caption_;
   uint32_t caption_until_ms_ = 0;
+  float caption_progress_ = 0;
+  std::vector<String> caption_lines_;        // caption_ wrapped to the screen width
+  std::vector<size_t> caption_line_chars_;   // characters on each of those lines
+  bool caption_wrapped_ = false;             // caption_lines_ matches caption_
   bool is_asleep_ = false;
   uint32_t fell_asleep_ms_ = 0;
   bool dimmed_for_sleep_ = false;

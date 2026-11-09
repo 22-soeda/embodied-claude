@@ -37,7 +37,7 @@
 #include "wifi_keeper.h"
 
 namespace {
-const char* kFirmwareVersion = "0.3.0";
+const char* kFirmwareVersion = "0.3.1";
 
 const uint32_t kSleepAfterHeadLostMs = 60 * 1000;
 const uint32_t kThinkingGiveUpMs = 90 * 1000;
@@ -215,6 +215,7 @@ void cancelListening() {
 void onSpeechFinished() {
   sendType("spoken");
   face.showCaption(last_spoken_text, kCaptionAfterSpeechMs);
+  face.setCaptionProgress(1);  // a long caption stays on its last lines
   face.setActivity(Activity::None);
   if (is_conversation_loop) startListening(true);
 }
@@ -475,6 +476,7 @@ void loop() {
 
   if (voice.updateSpeaking()) onSpeechFinished();
   face.setMouthOpen(voice.mouthLevel());
+  if (voice.isSpeaking()) face.setCaptionProgress(voice.speechProgress());
 
   if (face.activity() == Activity::Thinking && millis() - thinking_since_ms > kThinkingGiveUpMs) {
     face.setActivity(Activity::None);

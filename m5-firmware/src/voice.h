@@ -41,6 +41,8 @@ class Voice {
   bool updateSpeaking();
   bool isSpeaking() const { return is_playing_ || is_receiving_speech_; }
   float mouthLevel() const;
+  // 0..1: how much of the utterance has been played (0 until playback starts).
+  float speechProgress() const;
 
   // --- small sounds ---
   void playChime(Chime chime);

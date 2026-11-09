@@ -244,6 +244,12 @@ float Voice::mouthLevel() const {
   return constrain(level * 1.3f, 0.0f, 1.0f);
 }
 
+float Voice::speechProgress() const {
+  if (!is_playing_ || speech_bytes_expected_ < 2) return 0;
+  const float duration_ms = (speech_bytes_expected_ / 2) * 1000.0f / speech_sample_rate_;
+  return constrain((millis() - playback_started_ms_) / duration_ms, 0.0f, 1.0f);
+}
+
 // Computes the loudness of each step whose audio has arrived (the last, partial
 // step only once everything has).
 void Voice::extendMouthEnvelope() {
