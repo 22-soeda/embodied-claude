@@ -22,6 +22,7 @@ from .body_diary import BodyDiary, diary_kind
 from .config import REPO_ROOT
 from .desires import Desires
 from .ears import Ears
+from .errands import should_hold
 from .head import Head, HeadReply
 from .mouth import Mouth
 
@@ -51,6 +52,7 @@ class Conversation:
         body.on_utterance = self.hear_voice
         body.on_mitemite = self.see_picture
         body.on_event = self.feel_event
+        head.on_errand_report = self.tell_errand_report
 
     # ------------------------------------------------------------ inputs
 
@@ -95,7 +97,10 @@ class Conversation:
 
         await self.body.set_thinking(True)
         body_notes, notes_until = self.diary.unread(DIARY_READER)
+        held_reports, held_count = self.head.errands.held_notes()
         prompt = f"[{source}] {text}"
+        if held_reports:
+            prompt = f"[言えなかった報告]\n{held_reports}\n\n{prompt}"
         if body_notes:
             prompt = f"[体の記録]\n{body_notes}\n\n{prompt}"
         started = time.monotonic()
@@ -109,6 +114,9 @@ class Conversation:
         if body_notes:
             self.diary.mark_read(DIARY_READER, notes_until)  # only once the head has really read them
             self._add(LogLine("system", "体の記録を添えた：" + body_notes.replace("\n", " / ")))
+        if held_reports:
+            self.head.errands.clear_held(held_count)
+            self._add(LogLine("system", "言えなかった報告を添えた：" + held_reports.replace("\n", " / ")))
         # The person spoke to the body: that is talking together, whatever the
         # head answers. Recorded in the background, so the reply is not held up.
         self._in_background(self.desires.talked(source))
@@ -150,6 +158,24 @@ class Conversation:
             self.diary.record("said", text=text)
             log.info("the body said on its own: %s", text)
         return spoken
+
+    async def tell_errand_report(self, reply: HeadReply) -> None:
+        """The head's words on an errand that came back: say them now, or keep them if the body sleeps."""
+        if reply.is_silent:
+            self._add(LogLine("head", "（おつかいの報告に、黙っている）", source="おつかい"))
+            return
+        log.info("head reported an errand (read %s tokens): %s", reply.tokens_read, reply.text)
+        if should_hold(body_connected=self.body.is_connected, body_asleep=bool(self.body.state.get("asleep"))):
+            self.head.errands.hold(reply.text)
+            self._add(LogLine("system", f"体が寝ているので、おつかいの報告を次の会話まで取っておく：{reply.text}"))
+            return
+        if reply.mood:
+            await self.body.show_face(reply.mood, 6000)
+        if await self.speak(reply.text):
+            self._add(LogLine("head", reply.text, source="おつかい", mood=reply.mood))
+            self.diary.record("reported", text=reply.text)  # so the heartbeat knows it was said
+        else:
+            self.head.errands.hold(reply.text)
 
     async def _say_trouble(self, text: str) -> None:
         self._add(LogLine("system", text))

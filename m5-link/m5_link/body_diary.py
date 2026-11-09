@@ -44,6 +44,7 @@ DESCRIPTIONS = {
     "woken_by_touch": "タップで起こされた",
     "battery_low": "電池が少なくなった",
     "said": "自分から体の声で話しかけた",  # with the words; never merged with another
+    "reported": "おつかいの結果を体の声で伝えた",  # the conversation head's errand report, with the words
 }
 # Repeats of one kind closer together than this become one line: "持ち上げられた（3 回）".
 SAME_STRETCH_GAP_SECS = 10 * 60

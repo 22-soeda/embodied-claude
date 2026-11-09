@@ -36,6 +36,11 @@ effort = "low"
 companion_name = "添田"
 day_starts_at = 4  # the conversation session is closed and started afresh at this hour; memory carries over
 max_turns = 6      # model calls allowed for one reply, tool calls included
+# Errands: slow work (the web, long texts) done in the background by a subagent,
+# so the conversation stays fast. It can take its time and think more.
+errand_model = "sonnet"
+errand_effort = "medium"
+errand_max_turns = 15
 
 [ears]
 # "auto" = large-v3-turbo on an NVIDIA GPU, small on the CPU otherwise.
@@ -87,6 +92,9 @@ class HeadConfig:
     companion_name: str = "あなた"
     day_starts_at: int = 4
     max_turns: int = 6
+    errand_model: str = "sonnet"
+    errand_effort: str = "medium"
+    errand_max_turns: int = 15
 
 
 @dataclass(frozen=True)

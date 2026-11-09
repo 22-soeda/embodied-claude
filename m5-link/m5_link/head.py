@@ -16,6 +16,11 @@ memory what it wants to keep; the new day's session starts with SOUL.md and
 memory, not with yesterday's conversation. That keeps the context from growing
 all day, and lets tool changes take effect - a resumed session keeps sending
 the tool definitions it started with, even for tools since removed.
+
+Slow work (the web, long texts) goes out as an errand: a subagent running in
+the background, so the reply still comes in seconds (see errands.py). That is
+why the session's messages are read by one reader for as long as it is
+connected: when an errand comes back, the session starts a turn by itself.
 """
 
 from __future__ import annotations
@@ -27,32 +32,50 @@ import logging
 import re
 import shutil
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from claude_agent_sdk import (
+    TERMINAL_TASK_STATUSES,
+    AgentDefinition,
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    HookMatcher,
     ResultMessage,
+    SystemMessage,
+    TaskNotificationMessage,
+    TaskProgressMessage,
+    TaskStartedMessage,
+    TaskUpdatedMessage,
     TextBlock,
 )
 
 from .config import MCP_STARTUP_TIMEOUT_MS, REPO_ROOT, STATE_DIR, HeadConfig
+from .errands import ErrandBook
 
 log = logging.getLogger(__name__)
 
 SESSION_STATE_PATH = STATE_DIR / "head-session.json"
+HELD_REPORTS_PATH = STATE_DIR / "errand-reports-held.json"
 MOODS = ("happy", "sad", "surprised", "thinking", "sleepy", "love", "neutral")
 MOOD_TAG = re.compile(r"^\s*\[(" + "|".join(MOODS) + r")\]\s*")
 SILENT_TAG = "[silent]"
 # <br>, <br/>, </br>: the head sometimes ends a reply with one, and the voice read it out (2026-11-09).
 LINE_BREAK_TAG = re.compile(r"<\s*/?\s*br\s*/?\s*>", re.IGNORECASE)
 
-# Read: the "みてみて" pictures and its own reflections. WebSearch / WebFetch: from
-# outside, as PetitOnes have them (books go through the reader MCP server).
-BUILTIN_TOOLS = ["Read", "WebSearch", "WebFetch"]
+# Read: the "みてみて" pictures and its own reflections. Agent / TaskStop: sending
+# an errand and calling it back. WebSearch / WebFetch are in the session only for
+# the errands: a subagent can use no tool its session lacks (tried 2026-11-09),
+# and the head itself is kept from them by only_errands_go_out.
+BUILTIN_TOOLS = ["Read", "WebSearch", "WebFetch", "Agent", "TaskStop"]
+ERRAND_TOOLS = ["WebSearch", "WebFetch", "Read", "mcp__reader__read_page_info", "mcp__reader__read_page"]
+ERRAND_ONLY_TOOLS = "WebSearch|WebFetch|mcp__reader__.*"  # a PreToolUse matcher (a regex)
+# A turn the head started that has not ended by then is given up on (a safety net:
+# the session should answer within max_turns long before).
+TURN_TIMEOUT_SECS = 180
 # MCP servers of this repository the conversation does not load: the kernel
 # only makes sense together with the hooks, which this session leaves out.
 SKIPPED_MCP_SERVERS = {"individual-kernel"}
@@ -77,6 +100,7 @@ SYSTEM_PROMPT_TEMPLATE = """\
 - [体の記録] は、前に話してから体に起きたこと（持ち上げられた、揺さぶられた、近くに誰か来た など）。気になれば話のついでに触れていい。触れなくてもいい。
 - [体の記録] の「自分から体の声で話しかけた「…」」は、定期起床のときのあなたが体の声で{companion}に話しかけた言葉。この会話のあなたは覚えていないが、あなた自身が言ったこと。すぐあとの [声] は、たぶんその返事。
 - [区切り] は一日の終わりの合図。
+- [言えなかった報告] は、おつかいの報告のうち、体が寝ていて声にできなかったもの。{companion}はまだ聞いていないので、話のついでに伝える。
 
 記憶
 - この会話は毎朝 {day_starts_at} 時に区切られ、次の日のあなたには残らない。残るのは memory に書いたことと SOUL.md だけ。
@@ -85,11 +109,20 @@ SYSTEM_PROMPT_TEMPLATE = """\
 
 道具
 - 会話中は body の say を使わない。返事がそのまま声になるので二重になる。
-- 調べものは WebSearch と WebFetch、本や長い文章は reader の read_page で 1 ページずつ。返事が遅くなるので、会話中は頼まれたときか、どうしても要るときだけにする。
+- 調べもの、Web を読むこと、本や長い文章を読むこと、そのほか時間のかかることは、自分でやらずに Agent で errand（おつかい）に頼む。おつかいは裏で動くので、頼んだらすぐ「見てくるね」のように短く返して、結果は待たない。
+- おつかいの報告が届いたら、要点を 3 文までの話し言葉で{companion}に伝える。詳しいことは聞かれたら話す。日付や出どころは、報告に確かめたと書いてあることだけ言う。
+- 頼んだことが要らなくなった、頼みが変わったと分かったら、TaskStop でそのおつかいを止める。
 
 SOUL.md
 {soul}
 {reflection_index}{diary_summary}"""
+
+ERRAND_PROMPT = """\
+あなたは、M5Stack の体で{companion}と話している存在の、裏で動くおつかい役。頼まれた調べもの・読みものをして、結果を返す。
+- Web は WebSearch と WebFetch、本や長い文章は reader の read_page で 1 ページずつ読む。
+- 今日のニュースは、検索で探すより、ニュースの一覧や RSS を WebFetch で読む方が確か（例：Yahoo!ニュースのトピックス https://news.yahoo.co.jp/rss/topics/top-picks.xml）。
+- 一度でうまくいかなければ、言い方や読む先を変えてもう一度やる。
+- 返す結果は、あとで声で伝える元になる。日本語で 5 行以内に要点をまとめ、日付と出どころを添える。確かめられなかったことは、確かめられなかったと書く。"""
 
 CLOSE_THE_DAY_PROMPT = (
     "[区切り] 今日の会話はここで区切る。次の日のあなたは、この会話を覚えていない。"
@@ -159,6 +192,25 @@ def tool_fingerprint(mcp_server_names: list[str]) -> str:
     return hashlib.sha1(json.dumps(surface, sort_keys=True).encode()).hexdigest()[:12]
 
 
+async def only_errands_go_out(input_data: dict, tool_use_id: str | None, context) -> dict:
+    """PreToolUse: the web and reading tools are for errands; the head hands such work over.
+
+    The CLI sets agent_id only on calls made inside a subagent.
+    """
+    if input_data.get("agent_id"):
+        return {}
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "会話の頭は自分で調べない。Agent で errand に頼んで、結果は待たずに返事をする",
+    }}
+
+
+def is_errand_report(result: ResultMessage) -> bool:
+    """A turn the session started itself because an errand came back."""
+    return (result.origin or {}).get("kind") == "task-notification"
+
+
 def _load_mcp_servers() -> dict:
     config = json.loads((REPO_ROOT / ".mcp.json").read_text(encoding="utf-8"))
     return {
@@ -178,6 +230,14 @@ class Head:
         self.is_thinking = False
         self.mcp_status: list[dict] = []  # what the session reports for each MCP server
         self.context_tokens: int | None = None  # context size right after connecting
+        self.errands = ErrandBook(HELD_REPORTS_PATH)
+        # Called with the head's words when an errand has come back (Conversation sets it).
+        self.on_errand_report: Callable[[HeadReply], Awaitable[None]] | None = None
+        self._reader: asyncio.Task | None = None
+        self._waiting_reply: asyncio.Future[HeadReply] | None = None  # the turn we started
+        self._idle = asyncio.Event()  # no turn running in the session, ours or one it started
+        self._idle.set()
+        self._turn_text = ""  # the head's last words in the turn running now
 
     @property
     def is_ready(self) -> bool:
@@ -218,9 +278,17 @@ class Head:
                     await self._close_the_day()
 
     async def close(self) -> None:
+        if self._reader:
+            self._reader.cancel()
+            self._reader = None
+        if self.errands.running:
+            log.warning("closing the session with errands still out: %s",
+                        ", ".join(e.description for e in self.errands.running.values()))
+            self.errands.running.clear()  # they end with the session
         if self._client:
             await self._client.disconnect()
             self._client = None
+        self._idle.set()
 
     async def _close_the_day(self) -> None:
         """Let the head write down what it wants to keep, then start the new day's session.
@@ -256,6 +324,8 @@ class Head:
             mcp_servers=mcp_servers,
             tools=BUILTIN_TOOLS,
             allowed_tools=[*BUILTIN_TOOLS, *(f"mcp__{name}" for name in mcp_servers)],
+            agents={"errand": self._errand_agent()},
+            hooks={"PreToolUse": [HookMatcher(matcher=ERRAND_ONLY_TOOLS, hooks=[only_errands_go_out])]},
             permission_mode="dontAsk",
             env={
                 "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
@@ -272,10 +342,25 @@ class Head:
         await client.connect()
         self._client, self._state = client, state
         state.save()
+        self._reader = asyncio.create_task(self._read(client))
         log.info("head connected (%s, effort %s, day %s, %s)", self._config.model, self._config.effort,
                  state.day, f"resumed {state.session_id}" if state.session_id else "new session")
-        task = asyncio.create_task(self._report_tools(client))
-        self._background.add(task)
+        self._in_background(self._report_tools(client))
+
+    def _errand_agent(self) -> AgentDefinition:
+        return AgentDefinition(
+            description="時間のかかる調べもの・読みもの（Web、ニュース、本、長い文章）を、会話の裏でやる",
+            prompt=ERRAND_PROMPT.format(companion=self._config.companion_name),
+            tools=ERRAND_TOOLS,
+            model=self._config.errand_model,
+            effort=self._config.errand_effort,
+            maxTurns=self._config.errand_max_turns,
+            background=True,
+        )
+
+    def _in_background(self, coroutine) -> None:
+        task = asyncio.create_task(coroutine)
+        self._background.add(task)  # keep a reference until it finishes
         task.add_done_callback(self._background.discard)
 
     async def _report_tools(self, client: ClaudeSDKClient) -> None:
@@ -329,27 +414,79 @@ class Head:
                 self.is_thinking = False
 
     async def _take_turn(self, prompt: str) -> HeadReply:
-        await self._client.query(prompt)
-        last_text = ""
-        tokens_read = None
-        async for message in self._client.receive_response():
-            if isinstance(message, AssistantMessage):
-                texts = [block.text for block in message.content if isinstance(block, TextBlock)]
-                if texts:
-                    last_text = "".join(texts)  # the text after the last tool call is the reply
-            elif isinstance(message, ResultMessage):
-                if message.session_id:
-                    self._state.session_id = message.session_id
-                tokens_read = _prompt_tokens(message.usage)
-                if message.terminal_reason == "max_turns":
-                    log.warning("the head used up max_turns (%d) in one reply", self._config.max_turns)
-                elif message.is_error:
-                    log.warning("the head ended the turn with an error: %s", message.result)
+        """Send a prompt and wait for the turn it starts; _read hands the reply over."""
+        await self._idle.wait()  # an errand's report may be being told; the session takes turns one at a time
+        self._waiting_reply = asyncio.get_running_loop().create_future()
+        self._idle.clear()
+        try:
+            await self._client.query(prompt)
+            reply = await asyncio.wait_for(self._waiting_reply, TURN_TIMEOUT_SECS)
+        finally:
+            self._waiting_reply = None
         self._state.turns += 1
         self._state.save()
-        reply = parse_reply(last_text)
-        reply.tokens_read = tokens_read
         return reply
+
+    # ------------------------------------------------------------ the session's messages
+
+    async def _read(self, client: ClaudeSDKClient) -> None:
+        """Read everything the session sends, for as long as it is connected."""
+        try:
+            async for message in client.receive_messages():
+                self.take_in(message)
+            failure: BaseException = RuntimeError("the head's session ended")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - whoever waits for a reply must hear of it
+            log.exception("the head's message stream broke")
+            failure = error
+        if self._waiting_reply and not self._waiting_reply.done():
+            self._waiting_reply.set_exception(failure)
+        self._idle.set()
+
+    def take_in(self, message) -> None:
+        """Sort one message: errands going out and coming back, the head's words, the end of a turn."""
+        # The task messages are SystemMessages too, so they are looked at first.
+        if isinstance(message, TaskStartedMessage):
+            self.errands.started(message.task_id, message.description)
+            log.info("errand out: %s (%s)", message.description, message.task_id)
+        elif isinstance(message, TaskProgressMessage):
+            self.errands.progressed(message.task_id, message.description)
+        elif isinstance(message, (TaskUpdatedMessage, TaskNotificationMessage)):
+            status = (message.patch or {}).get("status") if isinstance(message, TaskUpdatedMessage) else message.status
+            if status in TERMINAL_TASK_STATUSES and (errand := self.errands.finished(message.task_id)):
+                log.info("errand %s: %s (%s)", status, errand.description, message.task_id)
+        elif isinstance(message, SystemMessage):
+            if message.subtype == "init":  # a turn begins: ours, or one the session starts by itself
+                self._idle.clear()
+        elif isinstance(message, AssistantMessage):
+            if message.parent_tool_use_id is None:  # an errand's own messages carry the Agent call's id
+                texts = [block.text for block in message.content if isinstance(block, TextBlock)]
+                if texts:
+                    self._turn_text = "".join(texts)  # the text after the last tool call is the reply
+        elif isinstance(message, ResultMessage):
+            self._end_turn(message)
+
+    def _end_turn(self, result: ResultMessage) -> None:
+        if result.session_id:
+            self._state.session_id = result.session_id
+        if result.terminal_reason == "max_turns":
+            log.warning("the head used up max_turns (%d) in one reply", self._config.max_turns)
+        elif result.is_error:
+            log.warning("the head ended the turn with an error: %s", result.result)
+        reply = parse_reply(self._turn_text)
+        reply.tokens_read = _prompt_tokens(result.usage)
+        self._turn_text = ""
+        self._idle.set()
+
+        if is_errand_report(result):
+            self._state.save()
+            if self.on_errand_report:
+                self._in_background(self.on_errand_report(reply))
+        elif self._waiting_reply and not self._waiting_reply.done():
+            self._waiting_reply.set_result(reply)
+        else:
+            log.warning("a turn ended that nobody was waiting for (origin %s): %s", result.origin, reply.text)
 
     def _system_prompt(self) -> str:
         """SOUL.md, and - as PetitOnes' heads always read them - the reflection index and diary summary."""
@@ -371,6 +508,8 @@ class Head:
             "context_tokens": self.context_tokens,
             "mcp": self.mcp_status,
             "model": self._config.model,
+            "errands": self.errands.running_list(),
+            "reports_held": self.errands.held_notes()[1],
         }
 
 

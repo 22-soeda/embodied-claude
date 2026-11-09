@@ -179,6 +179,10 @@ async function refresh() {
     ["今日のセッション", head.day ? `${head.day}（返事 ${head.replies} 回）` : null],
     ["文脈", head.context_tokens != null ? `${Math.round(head.context_tokens / 1000)}k トークン（起動時）` : null],
     ["MCP", mcpText || null],
+    ["おつかい", (head.errands || []).map(e =>
+      `${e.description}（${Math.max(0, Math.round((Date.now() / 1000 - e.started_at) / 60))} 分前から${e.progress ? "・" + e.progress : ""}）`
+    ).join("、") || "出していない"],
+    ["言えなかった報告", head.reports_held ? `${head.reports_held} 件（次の会話で伝える）` : null],
   ]);
   document.getElementById("notes").textContent = status.body_notes_unread || "（なし）";
   const desires = status.desires || [];
