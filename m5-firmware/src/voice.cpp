@@ -23,6 +23,19 @@ const uint32_t kGiveUpWithoutSpeechMs = 6000;
 const uint32_t kMaxUtteranceMs = 15000;
 const int kCalibrationChunks = 3;  // ~200 ms of room noise before judging
 
+// Speaking while the audio still arrives. It reaches the body at ~120 KB/s and
+// plays at 32 KB/s, so half a second in hand is plenty; before this, the body
+// waited for the whole utterance and the caption led the voice by seconds
+// (8 s for 14 s of speech at 4 KB frames, 2026-11-09).
+const size_t kStartAfterMs = 500;
+// Each request to the speaker: no scraps while more is coming, and no more
+// than a second at a time so the rest keeps flowing in behind it.
+const size_t kMinPieceMs = 100;
+const size_t kMaxPieceMs = 1000;
+// The mouth opens in proportion to the loudest step heard so far; this floor
+// keeps the first quiet steps from opening it fully.
+const float kQuietestFullMouthRms = 500;
+
 void onMicBufferReleased(void* /* args */, void* data, size_t /* length */) {
   xQueueSend(filled_chunks, &data, 0);
 }
@@ -133,13 +146,21 @@ bool Voice::beginSpeech(size_t total_bytes, uint32_t sample_rate) {
   if (total_bytes < 2) return false;
 
   speech_samples_ = static_cast<int16_t*>(heap_caps_malloc(total_bytes, MALLOC_CAP_SPIRAM));
-  if (speech_samples_ == nullptr) {
+  const size_t samples_per_step = sample_rate * kEnvelopeStepMs / 1000;
+  const size_t steps = (total_bytes / 2 + samples_per_step - 1) / samples_per_step;
+  mouth_envelope_ = static_cast<uint16_t*>(heap_caps_malloc(steps * sizeof(uint16_t), MALLOC_CAP_SPIRAM));
+  if (speech_samples_ == nullptr || mouth_envelope_ == nullptr) {
     Serial.printf("[voice] no PSRAM for %u bytes of speech\n", static_cast<unsigned>(total_bytes));
+    releaseSpeechBuffer();
     return false;
   }
   speech_bytes_expected_ = total_bytes;
   speech_bytes_received_ = 0;
+  speech_bytes_queued_ = 0;
   speech_sample_rate_ = sample_rate;
+  mouth_envelope_length_ = steps;
+  mouth_envelope_filled_ = 0;
+  mouth_loudest_ = 0;
   is_receiving_speech_ = true;
   return true;
 }
@@ -150,6 +171,8 @@ void Voice::appendSpeech(const uint8_t* pcm, size_t length) {
   const size_t copy_length = min(length, room);
   memcpy(reinterpret_cast<uint8_t*>(speech_samples_) + speech_bytes_received_, pcm, copy_length);
   speech_bytes_received_ += copy_length;
+  extendMouthEnvelope();
+  feedSpeaker();
 }
 
 void Voice::finishSpeech() {
@@ -159,15 +182,35 @@ void Voice::finishSpeech() {
     releaseSpeechBuffer();
     return;
   }
+  extendMouthEnvelope();  // the last, partial step
+  feedSpeaker();          // starts now if the utterance was shorter than kStartAfterMs
+}
 
-  computeMouthEnvelope();
-  switchToSpeaker();
-  const size_t sample_count = speech_bytes_received_ / 2;
-  M5.Speaker.playRaw(speech_samples_, sample_count, speech_sample_rate_,
-                     /* stereo = */ false, /* repeat = */ 1, /* channel = */ 0,
-                     /* stop_current_sound = */ true);
-  is_playing_ = true;
-  playback_started_ms_ = millis();
+// Starts playback once enough has arrived, then hands the speaker whatever has
+// arrived since, as long as its queue (one playing request, one waiting) has room.
+void Voice::feedSpeaker() {
+  if (speech_samples_ == nullptr) return;
+  const size_t bytes_per_ms = speech_sample_rate_ * 2 / 1000;
+  if (!is_playing_) {
+    const bool enough = speech_bytes_received_ >= kStartAfterMs * bytes_per_ms;
+    if (is_receiving_speech_ && !enough) return;
+    switchToSpeaker();
+    is_playing_ = true;
+    playback_started_ms_ = millis();
+  }
+  // isPlaying() == 2 means the queue is full; playRaw would then wait for a slot.
+  while (M5.Speaker.isPlaying(kSpeechChannel) < 2) {
+    size_t piece = (speech_bytes_received_ - speech_bytes_queued_) & ~static_cast<size_t>(1);
+    if (piece == 0) return;
+    if (is_receiving_speech_ && piece < kMinPieceMs * bytes_per_ms) return;
+    piece = min(piece, kMaxPieceMs * bytes_per_ms);
+    const int16_t* from = speech_samples_ + speech_bytes_queued_ / 2;
+    if (!M5.Speaker.playRaw(from, piece / 2, speech_sample_rate_, /* stereo = */ false,
+                            /* repeat = */ 1, kSpeechChannel, /* stop_current_sound = */ false)) {
+      return;
+    }
+    speech_bytes_queued_ += piece;
+  }
 }
 
 void Voice::stopSpeaking() {
@@ -179,10 +222,12 @@ void Voice::stopSpeaking() {
 
 bool Voice::updateSpeaking() {
   if (!is_playing_) return false;
+  feedSpeaker();
+  if (is_receiving_speech_ || speech_bytes_queued_ < speech_bytes_received_) return false;
   // isPlaying() can drop a moment before the last samples leave the DAC;
   // also wait for the computed duration so the mouth closes with the sound.
   const uint32_t duration_ms = (speech_bytes_received_ / 2) * 1000 / speech_sample_rate_;
-  const bool audio_done = !M5.Speaker.isPlaying();
+  const bool audio_done = !M5.Speaker.isPlaying(kSpeechChannel);
   const bool time_done = millis() - playback_started_ms_ > duration_ms;
   if (!(audio_done && time_done)) return false;
 
@@ -194,28 +239,24 @@ bool Voice::updateSpeaking() {
 float Voice::mouthLevel() const {
   if (!is_playing_ || mouth_envelope_ == nullptr) return 0;
   const size_t step = (millis() - playback_started_ms_) / kEnvelopeStepMs;
-  if (step >= mouth_envelope_length_) return 0;
-  return mouth_envelope_[step] / 255.0f;
+  if (step >= mouth_envelope_filled_) return 0;
+  const float level = mouth_envelope_[step] / max(mouth_loudest_, kQuietestFullMouthRms);
+  return constrain(level * 1.3f, 0.0f, 1.0f);
 }
 
-void Voice::computeMouthEnvelope() {
-  const size_t samples_per_step = speech_sample_rate_ * kEnvelopeStepMs / 1000;
-  const size_t sample_count = speech_bytes_received_ / 2;
-  mouth_envelope_length_ = (sample_count + samples_per_step - 1) / samples_per_step;
-  mouth_envelope_ = static_cast<uint8_t*>(heap_caps_malloc(mouth_envelope_length_, MALLOC_CAP_SPIRAM));
+// Computes the loudness of each step whose audio has arrived (the last, partial
+// step only once everything has).
+void Voice::extendMouthEnvelope() {
   if (mouth_envelope_ == nullptr) return;
-
-  float loudest = 1;
-  for (size_t step = 0; step < mouth_envelope_length_; ++step) {
-    const size_t first = step * samples_per_step;
-    const size_t count = min(samples_per_step, sample_count - first);
-    loudest = max(loudest, rmsOf(speech_samples_ + first, count));
-  }
-  for (size_t step = 0; step < mouth_envelope_length_; ++step) {
-    const size_t first = step * samples_per_step;
-    const size_t count = min(samples_per_step, sample_count - first);
-    const float level = rmsOf(speech_samples_ + first, count) / loudest;
-    mouth_envelope_[step] = static_cast<uint8_t>(constrain(level * 1.3f, 0.0f, 1.0f) * 255);
+  const size_t samples_per_step = speech_sample_rate_ * kEnvelopeStepMs / 1000;
+  const size_t samples_received = speech_bytes_received_ / 2;
+  while (mouth_envelope_filled_ < mouth_envelope_length_) {
+    const size_t first = mouth_envelope_filled_ * samples_per_step;
+    const size_t step_end = min(first + samples_per_step, speech_bytes_expected_ / 2);
+    if (step_end > samples_received && is_receiving_speech_) return;
+    const float rms = rmsOf(speech_samples_ + first, min(step_end, samples_received) - first);
+    mouth_loudest_ = max(mouth_loudest_, rms);
+    mouth_envelope_[mouth_envelope_filled_++] = static_cast<uint16_t>(min(rms, 65535.0f));
   }
 }
 
@@ -225,8 +266,10 @@ void Voice::releaseSpeechBuffer() {
   speech_samples_ = nullptr;
   mouth_envelope_ = nullptr;
   mouth_envelope_length_ = 0;
+  mouth_envelope_filled_ = 0;
   speech_bytes_expected_ = 0;
   speech_bytes_received_ = 0;
+  speech_bytes_queued_ = 0;
 }
 
 // ---------------------------------------------------------------- small sounds

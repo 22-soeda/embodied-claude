@@ -37,7 +37,7 @@
 #include "wifi_keeper.h"
 
 namespace {
-const char* kFirmwareVersion = "0.2.0";
+const char* kFirmwareVersion = "0.3.0";
 
 const uint32_t kSleepAfterHeadLostMs = 60 * 1000;
 const uint32_t kThinkingGiveUpMs = 90 * 1000;

@@ -8,8 +8,10 @@
 //
 // Listening streams 16 kHz PCM to the head chunk by chunk and decides by
 // itself when the person has finished: the head only gets the audio.
-// Speaking buffers one whole utterance in PSRAM, then plays it and moves the
-// mouth from a loudness envelope computed up front.
+// Speaking keeps one whole utterance in PSRAM and starts playing once the
+// first half second has arrived, handing the speaker the rest piece by piece
+// while it keeps arriving (the head sends faster than it plays). The mouth
+// follows a loudness envelope computed as the audio comes in.
 enum class ListenEnd { StillListening, Silence, NoSpeech, MaxLength };
 // Short soft sounds for falling asleep and waking, where PetitOnes play
 // zzz.wav and wakeup.wav from the SD card (this body has no SD files).
@@ -33,7 +35,7 @@ class Voice {
   // --- speaking ---
   bool beginSpeech(size_t total_bytes, uint32_t sample_rate);
   void appendSpeech(const uint8_t* pcm, size_t length);
-  void finishSpeech();  // plays once every byte has arrived
+  void finishSpeech();  // every byte has arrived (plays it now if it was too short to start)
   void stopSpeaking();
   // True exactly once, when playback has just finished.
   bool updateSpeaking();
@@ -46,7 +48,8 @@ class Voice {
  private:
   void switchToMicrophone();
   void switchToSpeaker();
-  void computeMouthEnvelope();
+  void feedSpeaker();
+  void extendMouthEnvelope();
   void releaseSpeechBuffer();
 
   uint8_t volume_percent_ = 70;
@@ -66,15 +69,19 @@ class Voice {
   int16_t* speech_samples_ = nullptr;
   size_t speech_bytes_expected_ = 0;
   size_t speech_bytes_received_ = 0;
+  size_t speech_bytes_queued_ = 0;  // handed to the speaker so far
   uint32_t speech_sample_rate_ = 16000;
   bool is_receiving_speech_ = false;
   bool is_playing_ = false;
   uint32_t playback_started_ms_ = 0;
-  uint8_t* mouth_envelope_ = nullptr;  // one value 0..255 per kEnvelopeStepMs
-  size_t mouth_envelope_length_ = 0;
+  uint16_t* mouth_envelope_ = nullptr;  // the loudness (RMS) of each kEnvelopeStepMs
+  size_t mouth_envelope_length_ = 0;    // steps the whole utterance has
+  size_t mouth_envelope_filled_ = 0;    // steps computed from the audio received so far
+  float mouth_loudest_ = 0;             // loudest step received so far
 
   static const uint32_t kSampleRate = 16000;
   static const uint32_t kEnvelopeStepMs = 40;
+  static const uint8_t kSpeechChannel = 0;  // chimes use channel 1
 };
 
 extern Voice voice;
