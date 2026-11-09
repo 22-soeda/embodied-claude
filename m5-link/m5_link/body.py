@@ -21,7 +21,10 @@ log = logging.getLogger(__name__)
 
 AUDIO = 0x01  # PCM 16-bit little endian, mono, 16 kHz
 JPEG = 0x02
-SPEECH_CHUNK_BYTES = 4096  # well under the firmware's 15 KB frame limit
+# Under the firmware WebSockets library's 15 KB frame limit (WEBSOCKETS_MAX_DATA_SIZE).
+# The body takes in about one frame per loop, between face frames, so bigger
+# frames carry speech faster: at 4 KB it came at about 60 KB/s (2026-11-09).
+SPEECH_CHUNK_BYTES = 12288
 SAMPLE_RATE = 16000
 
 
