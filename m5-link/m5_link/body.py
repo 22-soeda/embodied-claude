@@ -9,6 +9,7 @@ both reached through the callbacks set on Body.
 
 from __future__ import annotations
 
+import array
 import asyncio
 import logging
 import time
@@ -186,6 +187,8 @@ class Body:
                 asyncio.create_task(self.on_event(event))
         elif kind == "listen_start":
             await self._called()
+            if message.get("mic"):  # the phone says which microphone it got
+                log.info("%s listens with %s", self.name, message["mic"])
             self._utterance.clear()
             self._is_listening = True
             self._listen_loop = bool(message.get("loop"))
@@ -229,6 +232,9 @@ class Body:
         self._is_listening = False
         audio = bytes(self._utterance)
         self._utterance.clear()
+        samples = array.array("h", audio[: len(audio) // 2 * 2])
+        log.info("%s stopped listening (%s): %.1f s of sound, peak %d", self.name, reason,
+                 len(samples) / SAMPLE_RATE, max(map(abs, samples), default=0))
         if reason in ("cancelled", "no_speech") or len(audio) < SAMPLE_RATE // 2:  # under 0.25 s
             return
         if self.on_utterance:

@@ -58,7 +58,9 @@
 const AUDIO = 0x01, RATE = 16000;
 // As the M5 (m5-firmware/src/voice.cpp), but a longer limit: outside, things take longer to say.
 const END_SILENCE_MS = 900, NO_SPEECH_MS = 6000, MAX_LISTEN_MS = 30000;
-const MIN_SPEECH_RMS = 0.015;      // quieter than this is never speech
+const MIN_SPEECH_RMS = 0.008;      // quieter than this is never speech
+const MIC_SILENT_RMS = 0.002;      // after NO_SPEECH_MS below this, the mic gave nothing at all
+const MIC_WARMUP_MS = 4000;        // wireless earphones switch to their call mic first, sending zeros
 const KEEP_AWAKE_MS = 60 * 1000;   // the screen stays on this long after the last turn
 const CAPTION_AFTER_SPEECH_MS = 4000;
 
@@ -395,22 +397,44 @@ async function startListening() {
     setAudioSession("playback");
     return;
   }
-  const source = audio.createMediaStreamSource(stream);
-  const processor = audio.createScriptProcessor(4096, 1, 1);
-  mic = { stream, source, processor, resample: makeResampler(audio.sampleRate, RATE),
-          startedAt: performance.now(), heard: false, quietSince: 0, floor: 1 };
+  // Its own context, made after the mic is open, so it runs at the mic's rate: an
+  // earphone's call mic is 16 or 24 kHz, and iOS can give silence through a 48 kHz
+  // context made earlier for playback.
+  const capture = new (window.AudioContext || window.webkitAudioContext)();
+  const source = capture.createMediaStreamSource(stream);
+  const processor = capture.createScriptProcessor(4096, 1, 1);
+  const track = stream.getAudioTracks()[0];
+  mic = { stream, capture, source, processor, resample: makeResampler(capture.sampleRate, RATE),
+          openedAt: performance.now(), startedAt: 0, live: false, heard: false, quietSince: 0, floor: 1, peak: 0,
+          info: { label: track.label, rate: (track.getSettings && track.getSettings().sampleRate) || null, context: capture.sampleRate } };
   processor.onaudioprocess = (event) => onMicBlock(event.inputBuffer.getChannelData(0));
   source.connect(processor);
-  processor.connect(audio.destination);  // Safari runs the processor only when it is connected
-  send({ t: "listen_start", loop: false });
-  $("hint").textContent = "";
-  setActivity("listening");
+  processor.connect(capture.destination);  // Safari runs the processor only when it is connected
+  $("hint").textContent = "マイクを準備中…";
   setTalkButton();
   keepAwake();
 }
 
+// The mic gives real sound (not the zeros of a mic still switching on): from here it is heard.
+function micIsLive(now) {
+  mic.live = true;
+  mic.startedAt = now;
+  mic.info.warmup_ms = Math.round(now - mic.openedAt);
+  send({ t: "listen_start", loop: false, mic: mic.info });
+  $("hint").textContent = "どうぞ";
+  setActivity("listening");
+}
+
 function onMicBlock(samples) {
   if (!mic) return;
+  const now = performance.now();
+  if (!mic.live) {
+    if (samples.some((s) => s !== 0)) micIsLive(now);
+    else {
+      if (now - mic.openedAt > MIC_WARMUP_MS) { $("hint").textContent = "マイクから音が来ていない"; stopListening("cancelled", false); }
+      return;
+    }
+  }
   const pcm = mic.resample(samples);
   const frame = new Uint8Array(1 + pcm.byteLength);
   frame[0] = AUDIO;
@@ -424,28 +448,31 @@ function onMicBlock(samples) {
   mic.floor = Math.min(mic.floor * 1.02, Math.max(rms, 0.002));  // the room, rising slowly
   const isSpeech = rms > Math.max(MIN_SPEECH_RMS, mic.floor * 3);
   face.listening = Math.min(1, rms * 8);
-  const now = performance.now();
+  mic.peak = Math.max(mic.peak, rms);
   if (isSpeech) { mic.heard = true; mic.quietSince = 0; }
   else if (mic.heard && !mic.quietSince) mic.quietSince = now;
   if (mic.heard && mic.quietSince && now - mic.quietSince > END_SILENCE_MS) stopListening("silence");
-  else if (!mic.heard && now - mic.startedAt > NO_SPEECH_MS) stopListening("no_speech");
+  // Not sure it was speech: send it anyway if anything was there, and let speech recognition decide.
+  else if (!mic.heard && now - mic.startedAt > NO_SPEECH_MS) stopListening(mic.peak < MIC_SILENT_RMS ? "no_speech" : "silence");
   else if (now - mic.startedAt > MAX_LISTEN_MS) stopListening("max_length");
 }
 
 function stopListening(reason, tell = true) {
   if (!mic) return;
+  const wasLive = mic.live;
   mic.processor.onaudioprocess = null;
   mic.processor.disconnect();
   mic.source.disconnect();
   mic.stream.getTracks().forEach((track) => track.stop());  // so the reply plays on the speaker, not the earpiece
+  mic.capture.close();
   mic = null;
   setAudioSession("playback");
   setActivity("none");
   setTalkButton();
-  if (!tell) return;
+  if (!tell || !wasLive) { if (!wasLive && $("hint").textContent === "マイクを準備中…") $("hint").textContent = ""; return; }
   send({ t: "listen_end", reason });
-  if (reason === "no_speech") $("hint").textContent = "何も聞こえなかった";
-  else if (reason !== "cancelled") setActivity("thinking");
+  if (reason === "no_speech") $("hint").textContent = "マイクから音が来ていない";
+  else if (reason !== "cancelled") { $("hint").textContent = ""; setActivity("thinking"); }
 }
 
 // 16-bit PCM at `toRate` from the context's float samples, averaging what falls into each output sample.
