@@ -129,7 +129,7 @@ class Conversation:
             reply = await self.head.reply(prompt)
         except Exception as error:  # noqa: BLE001
             log.exception("the head failed to answer")
-            await self._say_trouble(f"頭がうまく働かなかった（{error}）")
+            await self._say_trouble(f"頭がうまく働かなかった（{error or '返事が来ない'}）")
             return HeadReply(is_silent=True)
         think_seconds = time.monotonic() - started
         if body_notes:

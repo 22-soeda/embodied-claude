@@ -76,6 +76,10 @@ ERRAND_ONLY_TOOLS = "WebSearch|WebFetch|mcp__reader__.*"  # a PreToolUse matcher
 # A turn the head started that has not ended by then is given up on (a safety net:
 # the session should answer within max_turns long before).
 TURN_TIMEOUT_SECS = 180
+# One message from the session can be big: an errand reading a long page, or a
+# picture. At the SDK's default of 1 MB the head's stream broke on 2026-11-11
+# while an errand read an article, and the head stayed deaf until a restart.
+MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 # MCP servers of this repository the conversation does not load: the kernel
 # only makes sense together with the hooks, which this session leaves out.
 SKIPPED_MCP_SERVERS = {"individual-kernel"}
@@ -339,6 +343,7 @@ class Head:
             },
             resume=state.session_id,
             cli_path=shutil.which("claude"),
+            max_buffer_size=MAX_MESSAGE_BYTES,
         )
         client = ClaudeSDKClient(options)
         await client.connect()
@@ -445,6 +450,25 @@ class Head:
         if self._waiting_reply and not self._waiting_reply.done():
             self._waiting_reply.set_exception(failure)
         self._idle.set()
+        # Not closed by us (that cancels this reader): get the head back rather than leave it deaf.
+        self._in_background(self._reconnect(client))
+
+    async def _reconnect(self, broken: ClaudeSDKClient) -> None:
+        """The session's stream ended or broke: resume the same session with a new client."""
+        async with self._turn_lock:  # a turn that was waiting has already been told; no new one starts meanwhile
+            if self._client is not broken:
+                return
+            try:
+                await self.close()
+            except Exception:  # noqa: BLE001 - the broken client may not close cleanly
+                log.warning("the broken head session did not close cleanly", exc_info=True)
+                self._client = None
+            try:
+                await self._connect(self._state)
+            except Exception:  # noqa: BLE001
+                log.exception("could not resume the head's session after the break; starting a new one")
+                await self._connect(self._new_state())
+            log.info("the head is back after its stream broke")
 
     def take_in(self, message) -> None:
         """Sort one message: errands going out and coming back, the head's words, the end of a turn."""
