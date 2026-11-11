@@ -15,65 +15,42 @@
   recorded here, cut at the end of speech, and sent as 16 kHz PCM; the reply
   comes back the same way and plays here. While the agent is in the M5, this
   page shows that instead of a face.
+
+  The face is the M5's own (m5-firmware/src/face.cpp), drawn the same way on a
+  320 x 240 canvas: same shapes, moods, blinking, sway, thinking dots,
+  listening bar, badge and caption, so it is one face in either body.
 -->
 <style>
-  :root { color-scheme: light; --ink: #222; --soft: #777; --line: #e4e4e4; --accent: #2b6cb0; }
+  :root { color-scheme: light; --face: #3e6a8a; --ink: #333; --soft: #888; --line: #e6e6e6; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #fff; color: var(--ink);
     font-family: -apple-system, "Hiragino Sans", sans-serif; -webkit-text-size-adjust: 100%; }
   body { display: flex; flex-direction: column; height: 100dvh;
     padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
-  header { display: flex; justify-content: space-between; font-size: 13px; color: var(--soft); padding: 10px 0; }
-  main { flex: 1; display: flex; flex-direction: column; align-items: center; min-height: 0; }
-
-  #face { position: relative; width: 200px; height: 130px; margin: 12px 0 8px; }
-  .eye { position: absolute; top: 20px; width: 26px; height: 52px; border-radius: 13px; background: var(--ink);
-    transition: height .08s, top .08s; }
-  .eye.left { left: 52px; } .eye.right { right: 52px; }
-  #face.blink .eye { height: 6px; top: 43px; }
-  #mouth { position: absolute; left: 80px; top: 92px; width: 40px; height: 6px; border-radius: 3px; background: var(--ink); }
-  #face.happy #mouth { height: 18px; border-radius: 0 0 20px 20px; }
-  #face.sad #mouth { height: 14px; top: 96px; border-radius: 20px 20px 0 0; background: none; border: 5px solid var(--ink); border-bottom: none; }
-  #face.surprised #mouth { left: 88px; width: 24px; height: 24px; border-radius: 12px; }
-  #face.speaking #mouth { animation: talk .22s infinite alternate; }
-  @keyframes talk { from { height: 6px; } to { height: 20px; } }
-  #dots { position: absolute; right: 8px; top: 0; font-size: 28px; letter-spacing: 2px; color: var(--soft); display: none; }
-  #face.thinking #dots { display: block; }
-
-  #away { display: none; flex-direction: column; align-items: center; justify-content: center; height: 150px; }
-  #away p { margin: 4px 0; } #away .where { font-size: 22px; } #away .hint { font-size: 13px; color: var(--soft); }
-  body.away #face { display: none; } body.away #away { display: flex; }
-
-  #caption { min-height: 3.2em; font-size: 18px; line-height: 1.6; text-align: center; padding: 0 4px; }
-  #log { list-style: none; margin: 8px 0 0; padding: 8px 0 0; width: 100%; flex: 1; overflow-y: auto;
+  #screen { display: block; width: 100%; aspect-ratio: 4 / 3; margin-top: 8px; touch-action: manipulation; }
+  #log { list-style: none; margin: 8px 0 0; padding: 8px 2px 0; flex: 1; overflow-y: auto; min-height: 0;
     border-top: 1px solid var(--line); font-size: 14px; line-height: 1.5; }
   #log li { margin: 0 0 8px; } #log .me { color: var(--soft); text-align: right; }
   #hint { font-size: 13px; color: var(--soft); text-align: center; min-height: 1.4em; margin: 6px 0; }
-
-  footer { padding: 8px 0 12px; }
-  #talk { display: block; width: 100%; height: 64px; border: none; border-radius: 32px; background: var(--accent);
-    color: #fff; font-size: 20px; font-weight: 600; }
-  #talk.listening { background: #c53030; } #talk.speaking { background: #4a5568; }
-  #talk:disabled { background: #cbd5e0; }
-  #level { height: 4px; margin: 6px 24px 0; border-radius: 2px; background: var(--line); overflow: hidden; }
-  #level div { height: 100%; width: 0; background: #c53030; }
+  footer { padding: 4px 0 12px; }
+  #talk { display: block; width: 100%; height: 60px; border: 2px solid var(--face); border-radius: 30px;
+    background: var(--face); color: #fff; font-size: 19px; font-weight: 600; }
+  #talk.listening { background: #fff; color: var(--face); }
+  #talk.speaking { background: #fff; color: var(--soft); border-color: var(--line); }
+  #talk:disabled { background: var(--line); border-color: var(--line); color: #fff; }
   form { display: flex; gap: 8px; margin-top: 10px; }
-  input { flex: 1; min-width: 0; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 22px; font-size: 16px; }
-  form button { height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 22px; background: #fff; font-size: 16px; color: var(--ink); }
+  input { flex: 1; min-width: 0; height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 22px;
+    font-size: 16px; background: #f4f4f4; }
+  form button { height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 22px; background: #fff;
+    font-size: 16px; color: var(--face); }
 </style>
 </head>
 <body>
-<header><span id="where">…</span><span id="link">つないでいる…</span></header>
-<main>
-  <div id="face"><div class="eye left"></div><div class="eye right"></div><div id="mouth"></div><div id="dots">…</div></div>
-  <div id="away"><p class="where"></p><p class="hint">話しかけると、こっちに来る</p></div>
-  <div id="caption"></div>
-  <ol id="log"></ol>
-</main>
+<canvas id="screen"></canvas>
+<ol id="log"></ol>
 <footer>
   <div id="hint"></div>
   <button id="talk" disabled>話す</button>
-  <div id="level"><div></div></div>
   <form id="type"><input id="text" placeholder="文字で話す" autocomplete="off" enterkeyhint="send"><button>送る</button></form>
 </footer>
 <script>
@@ -83,12 +60,202 @@ const AUDIO = 0x01, RATE = 16000;
 const END_SILENCE_MS = 900, NO_SPEECH_MS = 6000, MAX_LISTEN_MS = 30000;
 const MIN_SPEECH_RMS = 0.015;      // quieter than this is never speech
 const KEEP_AWAKE_MS = 60 * 1000;   // the screen stays on this long after the last turn
+const CAPTION_AFTER_SPEECH_MS = 4000;
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const token = params.get("token") || "";
 
-let socket = null, audio = null, mic = null, speech = null, wakeLock = null, sleepTimer = null;
+let socket = null, audio = null, output = null, mic = null, speech = null, wakeLock = null, sleepTimer = null;
+
+// ------------------------------------------------------------ the face (m5-firmware/src/face.cpp)
+
+const W = 320, H = 240, CAPTION_TOP = 176;
+const COLOR = { face: "#3e6a8a", background: "#ffffff", caption: "#333333", captionBack: "#f4f4f4",
+                heart: "#e0507a", dotOff: "#dddddd", barBack: "#e6e6e6" };
+const BLINK_MS = 160;
+const face = {
+  mood: "neutral", moodUntil: 0, activity: "none",  // none | listening | thinking | speaking
+  blinkStarted: 0, nextBlink: performance.now() + 2000 + Math.random() * 3000,
+  mouthOpen: 0, listening: 0, linked: false, away: "",
+  caption: "", captionUntil: 0, captionProgress: 0, captionLines: null,
+};
+const screen = $("screen"), ctx = screen.getContext("2d");
+
+function fitScreen() {
+  const scale = screen.clientWidth / W * (window.devicePixelRatio || 1);
+  screen.width = Math.round(W * scale);
+  screen.height = Math.round(H * scale);
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  face.captionLines = null;
+}
+
+function ellipse(x, y, rx, ry, color) { ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+function circle(x, y, r, color) { ellipse(x, y, r, r, color); }
+function roundRect(x, y, w, h, r, color) { ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
+function triangle(x0, y0, x1, y1, x2, y2, color) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.lineTo(x2, y2); ctx.closePath(); ctx.fill();
+}
+// LovyanGFX's fillArc: the ring between two radii, degrees clockwise from 3 o'clock.
+function arc(x, y, r0, r1, from, to, color) {
+  const a0 = from * Math.PI / 180, a1 = to * Math.PI / 180;
+  ctx.fillStyle = color; ctx.beginPath();
+  ctx.arc(x, y, Math.max(r0, r1), a0, a1); ctx.arc(x, y, Math.min(r0, r1), a1, a0, true);
+  ctx.closePath(); ctx.fill();
+}
+function heart(x, y, size, color) {
+  const lobe = size / 4;
+  circle(x - lobe, y - lobe / 2, lobe + 1, color);
+  circle(x + lobe, y - lobe / 2, lobe + 1, color);
+  triangle(x - size / 2, y, x + size / 2, y, x, y + size / 2, color);
+}
+
+function currentMood(now) { return face.moodUntil && now > face.moodUntil ? "neutral" : face.mood; }
+
+function drawEyes(cx, cy, now) {
+  const mood = currentMood(now);
+  let gx = 0, gy = 0;
+  if (face.activity === "listening") gx = Math.sin(now * 0.004) * 10;
+  else if (mood === "thinking" || face.activity === "thinking") { gx = -10; gy = -9; }
+  const eyeY = cy - 22 + gy;
+  let blink = 0;
+  const sinceBlink = now - face.blinkStarted;
+  if (sinceBlink < BLINK_MS) { const phase = sinceBlink / BLINK_MS; blink = phase < 0.5 ? phase * 2 : (1 - phase) * 2; }
+  for (const ex of [cx - 62 + gx, cx + 62 + gx]) {
+    if (mood === "happy") arc(ex, eyeY + 10, 20, 13, 200, 340, COLOR.face);
+    else if (mood === "sleepy") roundRect(ex - 18, eyeY, 36, 6, 3, COLOR.face);
+    else if (mood === "love") heart(ex, eyeY, 40, COLOR.heart);
+    else if (mood === "surprised") {
+      ellipse(ex, eyeY, 20, 20 * (1 - blink * 0.9) + 2, COLOR.face);
+      circle(ex + 6, eyeY - 7, 5, COLOR.background);
+    } else {
+      const height = Math.floor(26 * (1 - blink * 0.88)) + 2;
+      ellipse(ex, eyeY, 16, height, COLOR.face);
+      if (height > 12) circle(ex + 5, eyeY - 9, 4, COLOR.background);
+      if (mood === "sad") {  // a drooping lid: the outer upper corner is cut away
+        const outer = ex < cx ? -1 : 1;
+        triangle(ex - 22 * outer, eyeY - 30, ex + 24 * outer, eyeY - 30, ex + 24 * outer, eyeY - 4, COLOR.background);
+      }
+    }
+  }
+}
+
+function drawMouth(cx, cy, now) {
+  const my = cy + 34;
+  if (face.activity === "speaking") {
+    ellipse(cx, my + 8, 14 + face.mouthOpen * 6, 3 + face.mouthOpen * 20, COLOR.face);
+    return;
+  }
+  switch (currentMood(now)) {
+    case "happy": case "love": arc(cx, my - 6, 26, 19, 20, 160, COLOR.face); break;
+    case "sad": arc(cx, my + 22, 20, 15, 215, 325, COLOR.face); break;
+    case "surprised": ellipse(cx, my + 10, 9, 12, COLOR.face); break;
+    case "thinking": case "sleepy": roundRect(cx - 12, my + 6, 24, 5, 2, COLOR.face); break;
+    default: arc(cx, my - 2, 18, 13, 30, 150, COLOR.face);
+  }
+}
+
+function drawThinkingDots(cx, cy, now) {
+  const step = Math.floor(now / 350) % 4;
+  for (let dot = 0; dot < 3; dot++) circle(cx + 92 + dot * 14, cy - 74, 5, dot < step ? COLOR.face : COLOR.dotOff);
+}
+
+function drawListeningBar() {
+  roundRect(60, 222, 200, 8, 4, COLOR.barBack);
+  roundRect(60, 222, Math.max(face.listening * 200, 8), 8, 4, COLOR.face);
+}
+
+function badge() {
+  if (!face.linked) return "NO BRAIN";
+  if (face.activity === "listening") return "LISTEN";
+  if (face.activity === "thinking") return "THINK";
+  return null;
+}
+
+function drawBadge() {
+  const text = badge();
+  if (!text) return;
+  ctx.font = "bold 12px -apple-system, sans-serif";
+  const width = ctx.measureText(text).width + 12;
+  roundRect(W - width - 4, 4, width, 20, 6, COLOR.face);
+  ctx.fillStyle = COLOR.background; ctx.textBaseline = "middle";
+  ctx.fillText(text, W - width + 2, 14.5);
+}
+
+function wrapCaption(maxWidth) {
+  const lines = [];
+  let line = "";
+  for (const char of face.caption) {
+    if (char === "\n" || ctx.measureText(line + char).width > maxWidth) { lines.push(line); line = char === "\n" ? "" : char; }
+    else line += char;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawCaption() {
+  const MARGIN = 8, LINE = 20, MAX_LINES = 3;
+  ctx.fillStyle = COLOR.captionBack; ctx.fillRect(0, CAPTION_TOP, W, H - CAPTION_TOP);
+  ctx.font = '16px "Hiragino Sans", sans-serif'; ctx.fillStyle = COLOR.caption; ctx.textBaseline = "top";
+  if (!face.captionLines) face.captionLines = wrapCaption(W - MARGIN * 2);
+  const lines = face.captionLines;
+  // The line holding the character the voice has reached is shown second (face.cpp drawCaption).
+  const total = lines.reduce((sum, l) => sum + [...l].length, 0);
+  const reached = face.captionProgress * total;
+  let current = 0;
+  for (let passed = 0; current < lines.length - 1; current++) { passed += [...lines[current]].length; if (passed > reached) break; }
+  const first = Math.min(Math.max(current - 1, 0), Math.max(0, lines.length - MAX_LINES));
+  for (let row = 0; row < MAX_LINES && first + row < lines.length; row++) ctx.fillText(lines[first + row], MARGIN, CAPTION_TOP + 6 + row * LINE);
+}
+
+function drawAway() {
+  ctx.font = '24px "Hiragino Sans", sans-serif'; ctx.fillStyle = COLOR.caption;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(face.away, W / 2, H / 2 - 10);
+  ctx.font = '13px "Hiragino Sans", sans-serif'; ctx.fillStyle = "#999999";
+  ctx.fillText("話しかけると、こっちに来る", W / 2, H / 2 + 24);
+  ctx.textAlign = "left";
+}
+
+function drawFrame(now) {
+  ctx.fillStyle = COLOR.background; ctx.fillRect(0, 0, W, H);
+  if (face.away) { drawAway(); drawBadge(); return; }
+  if (now >= face.nextBlink) { face.blinkStarted = now; face.nextBlink = now + 2000 + Math.random() * 4000; }
+  if (face.captionUntil && now > face.captionUntil) { face.caption = ""; face.captionUntil = 0; face.captionLines = null; }
+  if (speech && !speech.silent && speech.firstAt && speech.total) face.captionProgress = Math.min(1, Math.max(0, (audio.currentTime - speech.firstAt) / speech.total));
+  if (face.activity === "speaking") face.mouthOpen = mouthLevel();
+
+  const t = now * 0.0015;  // a slow idle sway, so the face never looks frozen
+  const cx = 160 + Math.sin(t) * 4;
+  const cy = (face.caption ? 92 : 112) + Math.cos(t * 0.7) * 3;
+  drawEyes(cx, cy, now);
+  drawMouth(cx, cy, now);
+  if (face.activity === "thinking") drawThinkingDots(cx, cy, now);
+  if (face.activity === "listening") drawListeningBar();
+  drawBadge();
+  if (face.caption) drawCaption();
+}
+
+function animate(now) { drawFrame(now); requestAnimationFrame(animate); }
+
+function setActivity(activity) {
+  face.activity = activity;
+  if (activity !== "speaking") face.mouthOpen = 0;
+  if (activity !== "listening") face.listening = 0;
+}
+function showMood(mood, ms) { face.mood = mood || "neutral"; face.moodUntil = ms ? performance.now() + ms : 0; }
+function showCaption(text, ms) { face.caption = text; face.captionUntil = performance.now() + ms; face.captionProgress = 0; face.captionLines = null; }
+
+// How open the mouth is: the loudness of what is playing, as the M5 does with its speech envelope.
+let levelBuffer = null;
+function mouthLevel() {
+  if (!output) return 0;
+  if (!levelBuffer) levelBuffer = new Float32Array(output.fftSize);
+  output.getFloatTimeDomainData(levelBuffer);
+  let sum = 0;
+  for (const s of levelBuffer) sum += s * s;
+  return Math.min(1, Math.sqrt(sum / levelBuffer.length) * 5);
+}
 
 // ------------------------------------------------------------ the link
 
@@ -96,9 +263,9 @@ function connect() {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${scheme}//${location.host}/phone/socket?token=${encodeURIComponent(token)}`);
   socket.binaryType = "arraybuffer";
-  socket.onopen = () => { send({ t: "hello", name: "phone" }); $("link").textContent = ""; $("talk").disabled = false; };
+  socket.onopen = () => { send({ t: "hello", name: "phone" }); face.linked = true; $("talk").disabled = false; };
   socket.onclose = () => {
-    $("link").textContent = "つながっていない";
+    face.linked = false;
     $("talk").disabled = true;
     stopListening("cancelled", false);
     stopSpeech(false);
@@ -113,16 +280,15 @@ function send(message) {
 
 function onMessage(message) {
   switch (message.t) {
-    case "away":
-      document.body.classList.toggle("away", message.on);
-      $("where").textContent = message.on ? "" : "ここにいる";
-      document.querySelector("#away .where").textContent = message.text || "";
+    case "away": face.away = message.on ? message.text || "" : ""; break;
+    case "thinking":
+      if (message.on !== false) setActivity("thinking");
+      else if (face.activity === "thinking") setActivity("none");
       break;
-    case "thinking": setThinking(message.on !== false); break;
     case "face": showMood(message.mood, message.ms); break;
-    case "caption": $("caption").textContent = message.text || ""; break;
+    case "caption": showCaption(message.text || "", message.ms || 6000); break;
     case "heard": if (message.text) addLog(message.text, true); else $("hint").textContent = "聞き取れなかった"; break;
-    case "speak_start": beginSpeech(message.text || ""); break;
+    case "speak_start": beginSpeech(message.text || "", message.bytes || 0); break;
     case "speak_end": if (speech) { speech.ended = true; finishSpeechIfDone(); } else send({ t: "spoken" }); break;
   }
 }
@@ -130,23 +296,24 @@ function onMessage(message) {
 // ------------------------------------------------------------ hearing the reply
 
 function ensureAudio() {
-  if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audio) {
+    audio = new (window.AudioContext || window.webkitAudioContext)();
+    output = audio.createAnalyser();
+    output.fftSize = 512;
+    output.connect(audio.destination);
+  }
   if (audio.state !== "running") audio.resume();
 }
 
-function beginSpeech(text) {
-  setThinking(false);
+function beginSpeech(text, bytes) {
   stopSpeech(false);
-  $("caption").textContent = text;
+  showCaption(text, 120000);
   addLog(text, false);
   keepAwake();
-  if (!audio || audio.state !== "running") {  // iOS plays sound only after a touch on the page
-    $("hint").textContent = "画面にふれると、声も聞こえるようになる";
-    speech = { sources: [], playHead: 0, ended: false, pending: 0, silent: true };
-    return;
-  }
-  speech = { sources: [], playHead: 0, ended: false, pending: 0, silent: false };
-  setSpeaking(true);
+  const silent = !audio || audio.state !== "running";  // iOS plays sound only after a touch on the page
+  if (silent) $("hint").textContent = "画面にふれると、声も聞こえるようになる";
+  speech = { sources: [], playHead: 0, firstAt: 0, total: bytes / 2 / RATE, ended: false, pending: 0, silent };
+  setActivity(silent ? "none" : "speaking");
 }
 
 function onAudio(buffer) {
@@ -159,8 +326,9 @@ function onAudio(buffer) {
   chunk.copyToChannel(samples, 0);
   const source = audio.createBufferSource();
   source.buffer = chunk;
-  source.connect(audio.destination);
+  source.connect(output);
   const startAt = Math.max(speech.playHead, audio.currentTime + 0.1);
+  if (!speech.firstAt) speech.firstAt = startAt;
   source.start(startAt);
   speech.playHead = startAt + chunk.duration;
   speech.pending++;
@@ -172,7 +340,7 @@ function onAudio(buffer) {
 function finishSpeechIfDone() {
   if (!speech || !speech.ended || speech.pending > 0) return;
   speech = null;
-  setSpeaking(false);
+  endSpeech();
   send({ t: "spoken" });
 }
 
@@ -180,8 +348,15 @@ function stopSpeech(tell) {
   if (!speech) return;
   for (const source of speech.sources) { source.onended = null; try { source.stop(); } catch (_) {} }
   speech = null;
-  setSpeaking(false);
+  endSpeech();
   if (tell) send({ t: "speech_interrupted" });
+}
+
+function endSpeech() {
+  face.captionProgress = 1;  // a long caption stays on its last lines
+  if (face.caption) face.captionUntil = performance.now() + CAPTION_AFTER_SPEECH_MS;
+  setActivity("none");
+  setTalkButton();
 }
 
 // ------------------------------------------------------------ talking
@@ -204,8 +379,8 @@ async function startListening() {
   processor.connect(audio.destination);  // Safari runs the processor only when it is connected
   send({ t: "listen_start", loop: false });
   $("hint").textContent = "";
-  $("talk").classList.add("listening");
-  $("talk").textContent = "聞いてる（タップで送る）";
+  setActivity("listening");
+  setTalkButton();
   keepAwake();
 }
 
@@ -223,7 +398,7 @@ function onMicBlock(samples) {
   const rms = Math.sqrt(sum / samples.length);
   mic.floor = Math.min(mic.floor * 1.02, Math.max(rms, 0.002));  // the room, rising slowly
   const isSpeech = rms > Math.max(MIN_SPEECH_RMS, mic.floor * 3);
-  $("level").firstElementChild.style.width = Math.min(100, rms * 400) + "%";
+  face.listening = Math.min(1, rms * 8);
   const now = performance.now();
   if (isSpeech) { mic.heard = true; mic.quietSince = 0; }
   else if (mic.heard && !mic.quietSince) mic.quietSince = now;
@@ -239,13 +414,12 @@ function stopListening(reason, tell = true) {
   mic.source.disconnect();
   mic.stream.getTracks().forEach((track) => track.stop());  // so the reply plays on the speaker, not the earpiece
   mic = null;
-  $("talk").classList.remove("listening");
-  $("talk").textContent = "話す";
-  $("level").firstElementChild.style.width = "0";
+  setActivity("none");
+  setTalkButton();
   if (!tell) return;
   send({ t: "listen_end", reason });
   if (reason === "no_speech") $("hint").textContent = "何も聞こえなかった";
-  else if (reason !== "cancelled") setThinking(true);
+  else if (reason !== "cancelled") setActivity("thinking");
 }
 
 // 16-bit PCM at `toRate` from the context's float samples, averaging what falls into each output sample.
@@ -269,6 +443,13 @@ function makeResampler(fromRate, toRate) {
   };
 }
 
+function setTalkButton() {
+  const talk = $("talk");
+  talk.classList.toggle("listening", !!mic);
+  talk.classList.toggle("speaking", !!speech && !speech.silent);
+  talk.textContent = mic ? "聞いてる（タップで送る）" : speech && !speech.silent ? "話してる（タップで止める）" : "話す";
+}
+
 $("talk").addEventListener("click", () => {
   ensureAudio();
   if (speech) stopSpeech(true);
@@ -285,37 +466,17 @@ $("type").addEventListener("submit", (event) => {
   addLog(text, true);
   $("text").value = "";
   $("text").blur();
-  setThinking(true);
+  setActivity("thinking");
   keepAwake();
 });
+
+// A poke on the face blinks, as on the M5.
+screen.addEventListener("click", () => { face.blinkStarted = performance.now(); });
 
 // iOS starts sound only from a touch: the first touch anywhere unlocks it.
 for (const kind of ["touchend", "click"]) document.addEventListener(kind, ensureAudio, { once: true });
 
-// ------------------------------------------------------------ the face and the page
-
-function setThinking(on) { $("face").classList.toggle("thinking", on); }
-
-function setSpeaking(on) {
-  $("face").classList.toggle("speaking", on);
-  $("talk").classList.toggle("speaking", on);
-  $("talk").textContent = on ? "話してる（タップで止める）" : "話す";
-}
-
-let moodTimer = null;
-function showMood(mood, ms) {
-  const face = $("face");
-  face.classList.remove("happy", "sad", "surprised");
-  if (["happy", "sad", "surprised"].includes(mood)) face.classList.add(mood);
-  clearTimeout(moodTimer);
-  if (ms) moodTimer = setTimeout(() => face.classList.remove("happy", "sad", "surprised"), ms);
-}
-
-(function blink() {
-  $("face").classList.add("blink");
-  setTimeout(() => $("face").classList.remove("blink"), 140);
-  setTimeout(blink, 2000 + Math.random() * 4000);
-})();
+// ------------------------------------------------------------ the page
 
 function addLog(text, isMine) {
   const item = document.createElement("li");
@@ -337,7 +498,10 @@ async function keepAwake() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") { stopListening("cancelled"); stopSpeech(true); }
 });
+window.addEventListener("resize", fitScreen);
 
+fitScreen();
+requestAnimationFrame(animate);
 connect();
 </script>
 </body>
