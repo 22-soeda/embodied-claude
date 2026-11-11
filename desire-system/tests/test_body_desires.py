@@ -12,6 +12,7 @@ from desire_updater import (
     compute_desires,
     load_body_state,
     load_desire_file,
+    load_first_desire_file,
     record_satisfaction,
 )
 
@@ -55,6 +56,22 @@ def test_a_desire_file_replaces_the_set_and_fills_in_names(tmp_path):
     assert configs["miss_companion"].set_point == 0.3
     assert loaded.body_effects == [BATTERY_LOW]
     assert loaded.priority == ["miss_companion"]  # names not defined in the file are dropped
+
+
+def test_the_first_readable_desire_file_wins_and_the_unreadable_one_is_told(tmp_path, capsys):
+    own = tmp_path / "own.json"
+    own.write_text('{"desires": {"miss_companion": {"satisfaction_hours": 4,}}}', encoding="utf-8")  # a stray comma
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps({"desires": {"observe_room": {"satisfaction_hours": 2}}}), encoding="utf-8")
+
+    loaded = load_first_desire_file([own, template])
+
+    assert list(loaded.desires) == ["observe_room"]
+    assert f"[desire-updater] {own} を読めなかった" in capsys.readouterr().err
+
+
+def test_no_readable_desire_file_gives_none(tmp_path):
+    assert load_first_desire_file([tmp_path / "missing.json"]) is None
 
 
 def test_a_cross_effect_moves_other_desires_past_a_threshold():

@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 HOME = Path.home()
 REPO_FILES = [
     "SOUL.md", "SOUL_REFLECTIONS.md", "REFLECTION_INDEX.md", "TODO.md", "ROUTINES.md",
-    "diary_summary.md", "desires.conf", "desires.json", "schedule.conf",
+    "diary_summary.md", "desire-config.json", "desires.conf", "desires.json", "schedule.conf",
     "heartbeat-session-id", "last-session-date.txt", ".mcp.json",
     ".claude/settings.local.json", "desire-system/.env", "m5-link/m5-link.toml",
     ".autonomous-logs/notify-history.jsonl",

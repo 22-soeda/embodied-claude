@@ -233,6 +233,10 @@ DESIRE_CONFIGS: dict[str, DesireConfig] = {
 # interaction-orchestrator が名前で読むので。{companion} {self} {pronoun} は
 # COMPANION_NAME / SELF_NAME / SELF_PRONOUN に置き換わる。読めないファイルは
 # 標準エラーに一行出して既定の欲求に戻る（体の感覚ひとつで止まらないように）。
+#
+# DESIRE_CONFIG_FILE には、区切り文字（os.pathsep。Windows は ;）でファイルを
+# いくつか並べてもよい。先頭から読み、最初に読めたものを使う。本人が書き換える
+# 自分の写しを先に、雛形を後ろに置けば、写しを壊しても雛形で動き続ける。
 
 
 def _fill_names(text: str) -> str:
@@ -279,20 +283,28 @@ def load_desire_file(path: Path) -> DesireFile:
 BODY_EFFECTS: list[dict[str, Any]] = []
 CROSS_EFFECTS: list[dict[str, Any]] = []
 PRIORITY: list[str] = []  # empty: the dominant desire is the most uncomfortable one
+def load_first_desire_file(paths: list[Path]) -> DesireFile | None:
+    """The first of these files that can be read; each one that cannot is told on stderr."""
+    for path in paths:
+        try:
+            return load_desire_file(path)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+            print(f"[desire-updater] {path} を読めなかった: {error}", file=sys.stderr)
+    return None
+
+
 DESIRE_CONFIG_FILE = os.getenv("DESIRE_CONFIG_FILE", "").strip()
 if DESIRE_CONFIG_FILE:
-    try:
-        _desire_file = load_desire_file(Path(DESIRE_CONFIG_FILE).expanduser())
+    _desire_file = load_first_desire_file(
+        [Path(part).expanduser() for part in DESIRE_CONFIG_FILE.split(os.pathsep) if part.strip()]
+    )
+    if _desire_file:
         DESIRE_CONFIGS = _desire_file.desires
         BODY_EFFECTS = _desire_file.body_effects
         CROSS_EFFECTS = _desire_file.cross_effects
         PRIORITY = _desire_file.priority
-    except (OSError, ValueError, KeyError, TypeError) as error:
-        print(
-            f"[desire-updater] DESIRE_CONFIG_FILE={DESIRE_CONFIG_FILE} を読めなかったので"
-            f"既定の欲求を使う: {error}",
-            file=sys.stderr,
-        )
+    else:
+        print("[desire-updater] DESIRE_CONFIG_FILE のどれも読めなかったので既定の欲求を使う", file=sys.stderr)
 
 
 # ──────────────────────────────────────────────

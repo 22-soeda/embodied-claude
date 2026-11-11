@@ -423,6 +423,13 @@ if [ -f "$SCRIPT_DIR/SOUL_REFLECTIONS.md" ]; then
 - 詩・発見・提案は notes/ に。日記は diary/YYYY-MM-DD.txt に、夜に短く（書かなかった日は、夜に仕組みが記憶から書く）
 - INDEX が長くなったら、古いものを「まとめ」に畳む
 "
+  # 体があるときの欲求は本人のもの（configure_v0.py が雛形から写しを作る）。
+  if [ -f "$SCRIPT_DIR/desire-config.json" ]; then
+    REFLECTION_SECTION="${REFLECTION_SECTION}- 欲求は desire-config.json。何をどれだけ欲しがるかは自分で決めてよく、相談は要らない。説明の言葉、満ちるまでの時間（satisfaction_hours）、満たしたと数える言葉（keywords）、優先の順番を変えても、新しい欲求を足してもいい。直すときは SOUL.md と同じく、先に SOUL_REFLECTIONS.md の「変わったこと」に理由を書く
+- 欲求の強さは、keywords の言葉が記憶に最後に出てから何時間たったかで決まる。新しい欲求には、それをしたときに記憶へ書く言葉を keywords に入れる
+- miss_companion・observe_room・browse_curiosity・want_to_sleep の名前（英語のキー）だけは残す。ほかの仕組みが名前で読むので。直した中身は 5 分ほどで計算に入る。読めない形に壊すと雛形（m5-link/desire-config.json）で計算され、欲求の欄に（欲求の設定）として知らせが出る
+"
+  fi
 fi
 
 PROMPT="自律行動タイム（Heartbeat）

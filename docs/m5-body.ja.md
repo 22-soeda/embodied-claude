@@ -103,8 +103,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\register-m5-
 - **定期起床へ**：起床の直前に計算し直し、0.7 以上（PetitOnes の「すぐ行動する」線）を `DESIRE_DIGEST_FILE` でプロンプトに渡す。出しただけでは下がらない。実際にやって記憶に残すか、`satisfy_desire` で記録したときに下がる。PetitOnes の `satisfy_desire` は値を 0.4 下げるだけで、次の計算で記憶から戻るので、ここでは満たしを記憶に書く本家のやり方を残した
 - **タイマーの欲求は使わない**：PetitOnes に無いので、体の欲求があるときは `desires.conf` のタイマーを回さない
 - **眠る**：下の「一日の流れ」
-- 欲求の顔ぶれは `m5-link/desire-config.json`。名前は、desire-system に同じ欲求があるものはその名前（周りを見たい = `observe_room`）。個体カーネルと社会性の層が名前で読むので
-- `scripts/windows/configure_v0.py --with-body` が `desire-system/.env` にこの設定を書く。ウェブの画面の「欲求」に、今の強さがバーで出る
+- 欲求の雛形は `m5-link/desire-config.json`。名前は、desire-system に同じ欲求があるものはその名前（周りを見たい = `observe_room`）。個体カーネルと社会性の層が名前で読むので
+- **欲求は本人のもの**：`scripts/windows/configure_v0.py --with-body` が雛形をリポジトリ直下の `desire-config.json`（Git に入れない）に写し、`desire-system/.env` に「写し、だめなら雛形」の順で書く。定期起床はこの写しを相談なしで書き換えてよい（PetitOnes の教科書は「育ったら世話人と直してよい」だが、ここでは本人に任せる）。決まりは `autonomous-action.sh` の「自分の文書」：理由を先に思索の「変わったこと」に書く、`miss_companion`・`observe_room`・`browse_curiosity`・`want_to_sleep` の名前は残す（前の 3 つは個体カーネルと社会性の層が、`miss_companion` と `want_to_sleep` は m5-link が名前で読む）
+- 写しが読めないとき、desire-system は雛形で計算する。読めなかったことと、残すはずの名前が消えたことは、m5-link が次の起床の欲求の欄に「（欲求の設定）…」として出す。m5-link は 5 分ごとの計算のたびに写しを読み直すので、書き換えは再起動なしで入る
+- ウェブの画面の「欲求」に、今の強さがバーで出る
 
 ### 一日の流れ（PetitOnes の暮らし方）
 

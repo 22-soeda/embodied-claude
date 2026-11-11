@@ -20,7 +20,10 @@ It is safe to re-run: existing files are kept, only missing pieces are added.
    With --with-body the desire to talk comes from desire-system instead (it
    goes down when the companion actually talks to the body), so it is taken
    out of desires.conf, and desire-system/.env points desire-system at the
-   body's desires (m5-link/desire-config.json) and body state.
+   body's desires and body state. The desires are the agent's own copy,
+   desire-config.json, made from the template m5-link/desire-config.json; the
+   heartbeat may change the copy without asking, and desire-system falls back
+   to the template when it cannot read the copy.
 6. Its own documents, as PetitOnes' characters keep them: SOUL_REFLECTIONS.md
    and REFLECTION_INDEX.md from examples/, notes/ and diary/ with a README,
    and the textbook's routines (diary, a summary of the day's talk, reading
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -93,6 +97,9 @@ HEARTBEAT_ALLOW = [
     "Edit(./notes/**)",
     "Write(./diary/**)",
     "Edit(./diary/**)",
+    # Its own desires (with a body): what it wants and how fast, as PetitOnes'
+    # characters may change theirs. autonomous-action.sh gives the rules.
+    "Edit(./desire-config.json)",
 ]
 
 # Routines from PetitOnes' textbook (petit/templates/ROUTINES.md, Apache-2.0),
@@ -359,7 +366,9 @@ def configure_body_desires(companion: str) -> None:
     """
     path = REPO_ROOT / "desire-system" / ".env"
     wanted = {
-        "DESIRE_CONFIG_FILE": (REPO_ROOT / "m5-link" / "desire-config.json").as_posix(),
+        # The agent's copy first; the template when the copy cannot be read.
+        "DESIRE_CONFIG_FILE": os.pathsep.join([(REPO_ROOT / "desire-config.json").as_posix(),
+                                               (REPO_ROOT / "m5-link" / "desire-config.json").as_posix()]),
         "DESIRE_BODY_STATE_FILE": (REPO_ROOT / "m5-link" / "state" / "body-now.json").as_posix(),
         "COMPANION_NAME": companion,
     }
@@ -400,6 +409,7 @@ def main() -> None:
     copy_if_missing("desires.sample.conf", "desires.conf")
     if with_body:
         remove_talk_desire()
+        copy_if_missing("m5-link/desire-config.json", "desire-config.json")
         configure_body_desires(args.companion)
     else:
         add_talk_desire(args.companion)
