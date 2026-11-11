@@ -70,6 +70,7 @@ const token = params.get("token") || "";
 
 let socket = null, audio = null, output = null, mic = null, speech = null, wakeLock = null, sleepTimer = null;
 let replaced = false;  // another page of this phone took the link (a Safari tab and the home screen app)
+let unheard = null;    // the last speech that made no sound, kept to be played on a touch of the face
 
 // ------------------------------------------------------------ the face (m5-firmware/src/face.cpp)
 
@@ -328,53 +329,80 @@ function ensureAudio() {
 
 function beginSpeech(text, bytes) {
   stopSpeech(false);
+  unheard = null;
   showCaption(text, 120000);
   addLog(text, false);
   keepAwake();
   const silent = !audio;  // iOS plays sound only after a touch on the page
-  if (silent) $("hint").textContent = "画面にふれると、声も聞こえるようになる";
+  if (silent) $("hint").textContent = "顔にふれると、声が流れる";
   else if (audio.state !== "running") audio.resume();  // after the mic, iOS can leave it suspended
-  speech = { sources: [], playHead: 0, firstAt: 0, total: bytes / 2 / RATE, ended: false, pending: 0, silent, guard: 0 };
+  speech = { text, sources: [], chunks: [], playHead: 0, firstAt: 0, total: bytes / 2 / RATE,
+             ended: false, pending: 0, silent, guard: 0, local: false };
   setActivity(silent ? "none" : "speaking");
 }
 
 function onAudio(buffer) {
   const bytes = new Uint8Array(buffer);
-  if (!speech || speech.silent || bytes[0] !== AUDIO || bytes.length < 3) return;
+  if (!speech || speech.local || bytes[0] !== AUDIO || bytes.length < 3) return;
   const pcm = new Int16Array(buffer.slice(1, 1 + ((bytes.length - 1) & ~1)));
   const samples = new Float32Array(pcm.length);
   for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
+  speech.chunks.push(samples);  // kept, in case it makes no sound
+  if (!speech.silent) schedule(speech, samples);
+}
+
+function schedule(target, samples) {
   const chunk = audio.createBuffer(1, samples.length, RATE);
   chunk.copyToChannel(samples, 0);
   const source = audio.createBufferSource();
   source.buffer = chunk;
   source.connect(output);
-  const startAt = Math.max(speech.playHead, audio.currentTime + 0.1);
-  if (!speech.firstAt) speech.firstAt = startAt;
+  const startAt = Math.max(target.playHead, audio.currentTime + 0.1);
+  if (!target.firstAt) target.firstAt = startAt;
   source.start(startAt);
-  speech.playHead = startAt + chunk.duration;
-  speech.pending++;
-  const current = speech;
-  source.onended = () => { current.pending--; if (current === speech) finishSpeechIfDone(); };
-  speech.sources.push(source);
+  target.playHead = startAt + chunk.duration;
+  target.pending++;
+  source.onended = () => { target.pending--; if (target === speech) finishSpeechIfDone(); };
+  target.sources.push(source);
 }
 
 function finishSpeechIfDone() {
   if (!speech || !speech.ended || speech.pending > 0) return;
-  const played = !speech.silent && !speech.unplayed;
-  clearTimeout(speech.guard);
+  const done = speech;
+  const played = !done.silent && !done.unplayed;
+  clearTimeout(done.guard);
   speech = null;
   endSpeech();
+  if (done.local) return;
+  if (!played && done.chunks.length) {
+    unheard = { text: done.text, chunks: done.chunks };
+    $("hint").textContent = "顔にふれると、聞けなかった声が流れる";
+  }
   send({ t: "spoken", played, audio: audio ? audio.state : "none" });
 }
 
 function stopSpeech(tell) {
   if (!speech) return;
-  clearTimeout(speech.guard);
-  for (const source of speech.sources) { source.onended = null; try { source.stop(); } catch (_) {} }
+  const stopped = speech;
+  clearTimeout(stopped.guard);
+  for (const source of stopped.sources) { source.onended = null; try { source.stop(); } catch (_) {} }
   speech = null;
   endSpeech();
-  if (tell) send({ t: "speech_interrupted" });
+  if (tell && !stopped.local) send({ t: "speech_interrupted" });
+}
+
+// The voice that made no sound, played here again (m5-link has already moved on).
+function playUnheard() {
+  const { text, chunks } = unheard;
+  unheard = null;
+  ensureAudio();
+  $("hint").textContent = "";
+  showCaption(text, 120000);
+  speech = { text, sources: [], chunks, playHead: 0, firstAt: 0, total: chunks.reduce((n, c) => n + c.length, 0) / RATE,
+             ended: true, pending: 0, silent: false, guard: 0, local: true };
+  setActivity("speaking");
+  setTalkButton();
+  for (const samples of chunks) schedule(speech, samples);
 }
 
 function endSpeech() {
@@ -525,10 +553,14 @@ $("type").addEventListener("submit", (event) => {
 });
 
 // A poke on the face blinks, as on the M5.
-screen.addEventListener("click", () => { if (replaced) connect(); else face.blinkStarted = performance.now(); });
+screen.addEventListener("click", () => {
+  if (replaced) connect();
+  else if (unheard && !speech) playUnheard();
+  else face.blinkStarted = performance.now();
+});
 
-// iOS starts sound only from a touch: the first touch anywhere unlocks it.
-for (const kind of ["touchend", "click"]) document.addEventListener(kind, ensureAudio, { once: true });
+// iOS starts sound only from a touch, and can stop it when the app was away: every touch makes sure.
+for (const kind of ["touchend", "click"]) document.addEventListener(kind, () => ensureAudio());
 
 // ------------------------------------------------------------ the page
 
@@ -550,7 +582,10 @@ async function keepAwake() {
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") { stopListening("cancelled"); stopSpeech(true); }
+  if (document.visibilityState === "hidden") { stopListening("cancelled"); stopSpeech(true); return; }
+  // Back from another app: iOS may have taken the sound away while still calling it
+  // "running" (2026-11-11, after opening the Claude app). Make a new one at the next touch.
+  if (audio) { audio.close(); audio = output = levelBuffer = null; }
 });
 window.addEventListener("resize", fitScreen);
 
