@@ -44,9 +44,10 @@ log = logging.getLogger(__name__)
 
 DESIRE_CONFIG_PATH = REPO_ROOT / "desire-config.json"  # the agent's own copy, ignored by Git
 TEMPLATE_DESIRE_CONFIG_PATH = M5_LINK_DIR / "desire-config.json"
-# Read by name elsewhere: individual-kernel and interaction-orchestrator (the
-# first three), and m5-link itself (talking, sleeping).
-NAMES_READ_ELSEWHERE = ("miss_companion", "observe_room", "browse_curiosity", "want_to_sleep")
+# Read by name elsewhere: individual-kernel and interaction-orchestrator (all
+# three), and m5-link itself (talking). want_to_sleep is m5-link's too, but only
+# when the agent has it.
+NAMES_READ_ELSEWHERE = ("miss_companion", "observe_room", "browse_curiosity")
 BODY_STATE_PATH = STATE_DIR / "body-now.json"
 DESIRES_PATH = Path.home() / ".claude" / "desires.json"  # desire-system's default; the kernel reads it too
 UPDATE_INTERVAL_SECS = 5 * 60
@@ -78,7 +79,9 @@ class Desires:
             await asyncio.sleep(UPDATE_INTERVAL_SECS)
 
     async def slept(self, reason: str) -> None:
-        """The body has fallen asleep: record it as meeting want_to_sleep."""
+        """The body has fallen asleep: record it as meeting want_to_sleep, if the agent has that desire."""
+        if SLEEPING not in self._labels:
+            return
         why = "電池が減ったので" if reason == "battery" else ""
         await self.update(satisfy=SLEEPING, summary=f"{why}体が眠った")
 

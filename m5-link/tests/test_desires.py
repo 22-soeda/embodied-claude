@@ -12,7 +12,6 @@ ALL_NAMES_READ_ELSEWHERE = {
     "miss_companion": {"label": "{companion}と話したい"},
     "observe_room": {"label": "部屋を見たい"},
     "browse_curiosity": {"label": "調べたい"},
-    "want_to_sleep": {"label": "眠りたい"},
 }
 
 
@@ -57,13 +56,32 @@ def test_a_copy_that_cannot_be_read_falls_back_to_the_template_labels(tmp_path, 
 
 def test_a_name_others_read_gone_from_the_copy_reaches_the_heartbeat(tmp_path, monkeypatch):
     own = json.dumps({"desires": {name: spec for name, spec in ALL_NAMES_READ_ELSEWHERE.items()
-                                  if name != "want_to_sleep"}})
+                                  if name != "browse_curiosity"}})
     desires = make_desires(tmp_path, monkeypatch, {}, own=own)
     digest = tmp_path / "desire-digest.txt"
     desires.write_digest(digest)
     assert digest.read_text(encoding="utf-8").splitlines() == [
-        "（欲求の設定）desire-config.json に want_to_sleep が無い。ほかの仕組みが名前で読むので、この名前は残してほしい"
+        "（欲求の設定）desire-config.json に browse_curiosity が無い。ほかの仕組みが名前で読むので、この名前は残してほしい"
     ]
+
+
+def test_falling_asleep_is_recorded_only_when_the_agent_wants_to_sleep(tmp_path, monkeypatch):
+    recorded = []
+
+    async def fake_update(satisfy=None, summary=""):
+        recorded.append(satisfy)
+        return True
+
+    without_sleep = make_desires(tmp_path, monkeypatch, {})
+    monkeypatch.setattr(without_sleep, "update", fake_update)
+    asyncio.run(without_sleep.slept("battery"))
+
+    with_sleep = make_desires(tmp_path, monkeypatch, {}, own=json.dumps(
+        {"desires": {**ALL_NAMES_READ_ELSEWHERE, "want_to_sleep": {"label": "眠りたい"}}}))
+    monkeypatch.setattr(with_sleep, "update", fake_update)
+    asyncio.run(with_sleep.slept("battery"))
+
+    assert recorded == ["want_to_sleep"]
 
 
 def test_talking_is_recorded_at_most_every_half_hour(tmp_path, monkeypatch):
