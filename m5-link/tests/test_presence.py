@@ -153,6 +153,24 @@ def test_through_tailscale_serve_the_phone_page_needs_the_token(tmp_path):
     assert asyncio.run(statuses()) == [200, 401, 200, 200, 401]
 
 
+def test_a_second_phone_page_closes_the_first_so_it_does_not_dial_back(tmp_path):
+    presence = make_presence(tmp_path)
+    presence.bodies["phone"] = Body("phone")
+    conversation = Conversation(presence, FakeEars(), FakeHead(), FakeMouth(), BodyDiary(tmp_path / "diary"), FakeDesires())
+    config = LinkConfig(server=ServerConfig(token="secret"))
+
+    async def close_code() -> int:
+        async with TestClient(TestServer(build_app(config, conversation, None, None, "test"))) as client:
+            first = await client.ws_connect("/phone/socket?token=secret")
+            second = await client.ws_connect("/phone/socket?token=secret")
+            while (await first.receive()).type.name not in ("CLOSE", "CLOSED", "CLOSING"):
+                pass
+            await second.close()
+            return first.close_code
+
+    assert asyncio.run(close_code()) == 4000
+
+
 def test_the_manifest_names_the_app_and_leaves_the_start_to_the_page(tmp_path):
     presence = make_presence(tmp_path)
     conversation = Conversation(presence, FakeEars(), FakeHead(), FakeMouth(), BodyDiary(tmp_path / "diary"), FakeDesires())

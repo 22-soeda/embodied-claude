@@ -67,6 +67,7 @@ const params = new URLSearchParams(location.search);
 const token = params.get("token") || "";
 
 let socket = null, audio = null, output = null, mic = null, speech = null, wakeLock = null, sleepTimer = null;
+let replaced = false;  // another page of this phone took the link (a Safari tab and the home screen app)
 
 // ------------------------------------------------------------ the face (m5-firmware/src/face.cpp)
 
@@ -77,7 +78,7 @@ const BLINK_MS = 160;
 const face = {
   mood: "neutral", moodUntil: 0, activity: "none",  // none | listening | thinking | speaking
   blinkStarted: 0, nextBlink: performance.now() + 2000 + Math.random() * 3000,
-  mouthOpen: 0, listening: 0, linked: false, away: "",
+  mouthOpen: 0, listening: 0, linked: false, away: "", awayHint: "",
   caption: "", captionUntil: 0, captionProgress: 0, captionLines: null,
 };
 const screen = $("screen"), ctx = screen.getContext("2d");
@@ -166,7 +167,7 @@ function drawListeningBar() {
 }
 
 function badge() {
-  if (!face.linked) return "NO BRAIN";
+  if (!face.linked && !replaced) return "NO BRAIN";
   if (face.activity === "listening") return "LISTEN";
   if (face.activity === "thinking") return "THINK";
   return null;
@@ -213,12 +214,13 @@ function drawAway() {
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(face.away, W / 2, H / 2 - 10);
   ctx.font = '13px "Hiragino Sans", sans-serif'; ctx.fillStyle = "#999999";
-  ctx.fillText("話しかけると、こっちに来る", W / 2, H / 2 + 24);
+  ctx.fillText(face.awayHint, W / 2, H / 2 + 24);
   ctx.textAlign = "left";
 }
 
 function drawFrame(now) {
   ctx.fillStyle = COLOR.background; ctx.fillRect(0, 0, W, H);
+  if (replaced) { face.away = "ほかの画面で開いている"; face.awayHint = "タップすると、この画面で話せる"; }
   if (face.away) { drawAway(); drawBadge(); return; }
   if (now >= face.nextBlink) { face.blinkStarted = now; face.nextBlink = now + 2000 + Math.random() * 4000; }
   if (face.captionUntil && now > face.captionUntil) { face.caption = ""; face.captionUntil = 0; face.captionLines = null; }
@@ -260,15 +262,18 @@ function mouthLevel() {
 // ------------------------------------------------------------ the link
 
 function connect() {
+  replaced = false;
+  face.away = "";
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${scheme}//${location.host}/phone/socket?token=${encodeURIComponent(token)}`);
   socket.binaryType = "arraybuffer";
   socket.onopen = () => { send({ t: "hello", name: "phone" }); face.linked = true; $("talk").disabled = false; };
-  socket.onclose = () => {
+  socket.onclose = (event) => {
     face.linked = false;
-    $("talk").disabled = true;
     stopListening("cancelled", false);
     stopSpeech(false);
+    if (event.code === 4000) { replaced = true; return; }  // the other page has it; wait for a tap here
+    $("talk").disabled = true;
     setTimeout(connect, 2000);
   };
   socket.onmessage = (event) => typeof event.data === "string" ? onMessage(JSON.parse(event.data)) : onAudio(event.data);
@@ -280,7 +285,7 @@ function send(message) {
 
 function onMessage(message) {
   switch (message.t) {
-    case "away": face.away = message.on ? message.text || "" : ""; break;
+    case "away": face.away = message.on ? message.text || "" : ""; face.awayHint = "話しかけると、こっちに来る"; break;
     case "thinking":
       if (message.on !== false) setActivity("thinking");
       else if (face.activity === "thinking") setActivity("none");
@@ -289,14 +294,28 @@ function onMessage(message) {
     case "caption": showCaption(message.text || "", message.ms || 6000); break;
     case "heard": if (message.text) addLog(message.text, true); else $("hint").textContent = "聞き取れなかった"; break;
     case "speak_start": beginSpeech(message.text || "", message.bytes || 0); break;
-    case "speak_end": if (speech) { speech.ended = true; finishSpeechIfDone(); } else send({ t: "spoken" }); break;
+    case "speak_end":
+      if (!speech) { send({ t: "spoken" }); break; }
+      speech.ended = true;
+      // If the sound never plays (iOS kept it suspended), the end still comes.
+      speech.guard = setTimeout(() => { if (speech) { speech.pending = 0; speech.unplayed = audio && audio.state; finishSpeechIfDone(); } },
+                                (Math.max(0, speech.playHead - (audio ? audio.currentTime : 0)) + 3) * 1000);
+      finishSpeechIfDone();
+      break;
   }
 }
 
 // ------------------------------------------------------------ hearing the reply
 
+// Web Audio on an iPhone is silent while the ring/silent switch is on, unless
+// the page says it plays sound on purpose (Safari 16.4+: navigator.audioSession).
+function setAudioSession(type) {
+  if (navigator.audioSession) navigator.audioSession.type = type;
+}
+
 function ensureAudio() {
   if (!audio) {
+    setAudioSession("playback");
     audio = new (window.AudioContext || window.webkitAudioContext)();
     output = audio.createAnalyser();
     output.fftSize = 512;
@@ -310,9 +329,10 @@ function beginSpeech(text, bytes) {
   showCaption(text, 120000);
   addLog(text, false);
   keepAwake();
-  const silent = !audio || audio.state !== "running";  // iOS plays sound only after a touch on the page
+  const silent = !audio;  // iOS plays sound only after a touch on the page
   if (silent) $("hint").textContent = "画面にふれると、声も聞こえるようになる";
-  speech = { sources: [], playHead: 0, firstAt: 0, total: bytes / 2 / RATE, ended: false, pending: 0, silent };
+  else if (audio.state !== "running") audio.resume();  // after the mic, iOS can leave it suspended
+  speech = { sources: [], playHead: 0, firstAt: 0, total: bytes / 2 / RATE, ended: false, pending: 0, silent, guard: 0 };
   setActivity(silent ? "none" : "speaking");
 }
 
@@ -339,13 +359,16 @@ function onAudio(buffer) {
 
 function finishSpeechIfDone() {
   if (!speech || !speech.ended || speech.pending > 0) return;
+  const played = !speech.silent && !speech.unplayed;
+  clearTimeout(speech.guard);
   speech = null;
   endSpeech();
-  send({ t: "spoken" });
+  send({ t: "spoken", played, audio: audio ? audio.state : "none" });
 }
 
 function stopSpeech(tell) {
   if (!speech) return;
+  clearTimeout(speech.guard);
   for (const source of speech.sources) { source.onended = null; try { source.stop(); } catch (_) {} }
   speech = null;
   endSpeech();
@@ -363,11 +386,13 @@ function endSpeech() {
 
 async function startListening() {
   ensureAudio();
+  setAudioSession("play-and-record");
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (error) {
     $("hint").textContent = "マイクが使えない（" + error.name + "）";
+    setAudioSession("playback");
     return;
   }
   const source = audio.createMediaStreamSource(stream);
@@ -414,6 +439,7 @@ function stopListening(reason, tell = true) {
   mic.source.disconnect();
   mic.stream.getTracks().forEach((track) => track.stop());  // so the reply plays on the speaker, not the earpiece
   mic = null;
+  setAudioSession("playback");
   setActivity("none");
   setTalkButton();
   if (!tell) return;
@@ -452,7 +478,8 @@ function setTalkButton() {
 
 $("talk").addEventListener("click", () => {
   ensureAudio();
-  if (speech) stopSpeech(true);
+  if (replaced) connect();
+  else if (speech) stopSpeech(true);
   else if (mic) stopListening("silence");
   else startListening();
 });
@@ -471,7 +498,7 @@ $("type").addEventListener("submit", (event) => {
 });
 
 // A poke on the face blinks, as on the M5.
-screen.addEventListener("click", () => { face.blinkStarted = performance.now(); });
+screen.addEventListener("click", () => { if (replaced) connect(); else face.blinkStarted = performance.now(); });
 
 // iOS starts sound only from a touch: the first touch anywhere unlocks it.
 for (const kind of ["touchend", "click"]) document.addEventListener(kind, ensureAudio, { once: true });

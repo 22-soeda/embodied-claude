@@ -28,6 +28,10 @@ JPEG = 0x02
 # frames carry speech faster: at 4 KB it came at about 60 KB/s (2026-11-09).
 SPEECH_CHUNK_BYTES = 12288
 SAMPLE_RATE = 16000
+# Closing an old connection for a new one: a page that gets this does not dial
+# back in, so two pages of the phone (a Safari tab and the home screen app)
+# do not keep pushing each other out (2026-11-11).
+REPLACED = 4000
 
 
 @dataclass
@@ -77,8 +81,8 @@ class Body:
         socket = web.WebSocketResponse(heartbeat=20, max_msg_size=4 * 1024 * 1024, protocols=("arduino",))
         await socket.prepare(request)
         if self._socket is not None and not self._socket.closed:
-            log.info("a new body connection replaces the old one")
-            await self._socket.close()
+            log.info("a new %s connection replaces the old one", self.name)
+            await self._socket.close(code=REPLACED, message=b"replaced")
 
         self._socket = socket
         self.connected_at = time.time()
@@ -96,6 +100,7 @@ class Body:
                 self._socket = None
                 self.connected_at = None
                 self._is_listening = False
+                self._speech_done.set()  # nobody is left to play it
                 self._remember(BodyEvent("disconnected"))
         return socket
 
@@ -121,17 +126,25 @@ class Body:
         self._speech_done.clear()
         self.is_speaking = True
         started = time.monotonic()
-        async with self._send_lock:
-            await self._socket.send_json(
-                {"t": "speak_start", "bytes": len(pcm), "rate": SAMPLE_RATE, "text": text}
-            )
-            for start in range(0, len(pcm), SPEECH_CHUNK_BYTES):
-                await self._socket.send_bytes(bytes([AUDIO]) + pcm[start : start + SPEECH_CHUNK_BYTES])
-            await self._socket.send_json({"t": "speak_end"})
+        socket = self._socket
+        try:
+            async with self._send_lock:
+                await socket.send_json({"t": "speak_start", "bytes": len(pcm), "rate": SAMPLE_RATE, "text": text})
+                for start in range(0, len(pcm), SPEECH_CHUNK_BYTES):
+                    await socket.send_bytes(bytes([AUDIO]) + pcm[start : start + SPEECH_CHUNK_BYTES])
+                await socket.send_json({"t": "speak_end"})
+        except (ConnectionError, RuntimeError) as error:
+            log.warning("the %s went away while the speech was sent: %s", self.name, error)
+            self.is_speaking = False
+            return False
         playback_seconds = len(pcm) / 2 / SAMPLE_RATE
         if wait:
             try:
                 await asyncio.wait_for(self._speech_done.wait(), timeout=playback_seconds + 10)
+                if self._socket is not socket:
+                    log.warning("the %s went away before the speech ended", self.name)
+                    self.is_speaking = False
+                    return False
                 # The caption shows at speak_start; the body reports "spoken" when
                 # the sound ends. What is left over is how long the voice lagged
                 # the caption (stops in the sound included, if any).
@@ -179,6 +192,8 @@ class Body:
         elif kind == "listen_end":
             await self._finish_utterance(message.get("reason", "?"))
         elif kind == "spoken" or kind == "speech_interrupted":
+            if message.get("played") is False:  # the phone could not make a sound
+                log.warning("the %s could not play the speech (audio %s)", self.name, message.get("audio"))
             self._speech_done.set()
         elif kind == "snapshot":
             if message.get("reason") == "mitemite":
