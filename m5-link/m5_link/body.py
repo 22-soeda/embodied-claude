@@ -1,8 +1,10 @@
-"""The M5 body as the desktop sees it: one WebSocket, at most one body.
+"""A body as the desktop sees it: one WebSocket, at most one connection per body.
 
-Messages are described in docs/m5-body-protocol.ja.md. This module only moves
-them; what to do with an utterance or a picture is the Conversation's job,
-reached through the callbacks set on Body.
+There are two: the M5 on the desk and the phone page taken outside. Both speak
+the messages in docs/m5-body-protocol.ja.md (the phone a subset, plus typed
+text). This module only moves them; what to do with an utterance or a picture
+is the Conversation's job, and which body the agent is in is the Presence's,
+both reached through the callbacks set on Body.
 """
 
 from __future__ import annotations
@@ -36,10 +38,16 @@ class BodyEvent:
 
 
 class Body:
-    def __init__(self) -> None:
+    def __init__(self, name: str = "body") -> None:
+        self.name = name
         self.on_utterance: Callable[[bytes, bool], Awaitable[None]] | None = None
         self.on_mitemite: Callable[[bytes], Awaitable[None]] | None = None
         self.on_event: Callable[[BodyEvent], Awaitable[None]] | None = None
+        self.on_text: Callable[[str], Awaitable[None]] | None = None  # typed on the phone
+        # The companion turned to this body (began to talk, typed, showed a
+        # picture): the agent comes here. Awaited before the message goes on.
+        self.on_call: Callable[[], Awaitable[None]] | None = None
+        self.on_connect: Callable[[], Awaitable[None]] | None = None
 
         self.hello: dict = {}
         self.state: dict = {}
@@ -75,6 +83,8 @@ class Body:
         self._socket = socket
         self.connected_at = time.time()
         self._remember(BodyEvent("connected", detail={"peer": request.remote}))
+        if self.on_connect:
+            asyncio.create_task(self.on_connect())
         try:
             async for message in socket:
                 if message.type == WSMsgType.TEXT:
@@ -152,7 +162,7 @@ class Body:
         kind = message.get("t")
         if kind == "hello":
             self.hello = message
-            log.info("body says hello: %s", message)
+            log.info("%s says hello: %s", self.name, message)
         elif kind == "state":
             self.state = message
         elif kind == "event":
@@ -162,6 +172,7 @@ class Body:
             if self.on_event:
                 asyncio.create_task(self.on_event(event))
         elif kind == "listen_start":
+            await self._called()
             self._utterance.clear()
             self._is_listening = True
             self._listen_loop = bool(message.get("loop"))
@@ -170,9 +181,17 @@ class Body:
         elif kind == "spoken" or kind == "speech_interrupted":
             self._speech_done.set()
         elif kind == "snapshot":
+            if message.get("reason") == "mitemite":
+                await self._called()
             self._pending_jpeg = message
         elif kind == "snapshot_failed":
             self._resolve_snapshot(message.get("id", ""), None)
+        elif kind == "text":
+            text = str(message.get("text", "")).strip()
+            if text:
+                await self._called()
+                if self.on_text:
+                    asyncio.create_task(self.on_text(text))
         else:
             log.debug("unhandled message from the body: %s", message)
 
@@ -200,6 +219,10 @@ class Body:
         if self.on_utterance:
             asyncio.create_task(self.on_utterance(audio, self._listen_loop))
 
+    async def _called(self) -> None:
+        if self.on_call:
+            await self.on_call()
+
     def _resolve_snapshot(self, request_id: str, jpeg: bytes | None) -> None:
         waiter = self._snapshot_waiters.get(request_id)
         if waiter is None or waiter.done():
@@ -211,7 +234,7 @@ class Body:
 
     def _remember(self, event: BodyEvent) -> None:
         self.events.append(event)
-        log.info("body event: %s", event.kind)
+        log.info("%s event: %s", self.name, event.kind)
 
     def summary(self) -> dict:
         return {

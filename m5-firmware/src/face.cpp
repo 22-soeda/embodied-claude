@@ -108,9 +108,17 @@ void Face::setPowerSave(bool on) {
   applyBrightness();
 }
 
+void Face::setAway(bool away, const String& where) {
+  is_away_ = away;
+  away_text_ = where;
+  applyBrightness();
+}
+
 void Face::applyBrightness() {
   // While the eyes are closing the screen stays lit; it dims once asleep (see update()).
-  if (is_asleep_ && millis() - fell_asleep_ms_ >= kFallAsleepMs) {
+  if (is_away_) {
+    M5.Display.setBrightness(kAwayBrightness);
+  } else if (is_asleep_ && millis() - fell_asleep_ms_ >= kFallAsleepMs) {
     M5.Display.setBrightness(kAsleepBrightness);
   } else {
     M5.Display.setBrightness(power_save_ ? min(kPowerSaveBrightness, kAwakeBrightness) : kAwakeBrightness);
@@ -130,7 +138,7 @@ void Face::reflexBlink() {
 void Face::update() {
   const uint32_t now = millis();
   const bool dozing = is_asleep_ && now - fell_asleep_ms_ < kFallAsleepMs;
-  const uint32_t frames_per_second = is_asleep_ && !dozing ? kAsleepFramesPerSecond
+  const uint32_t frames_per_second = (is_asleep_ && !dozing) || is_away_ ? kAsleepFramesPerSecond
                                      : power_save_         ? kPowerSaveFramesPerSecond
                                                            : kFramesPerSecond;
   if (now - last_frame_ms_ < 1000 / frames_per_second) return;
@@ -165,6 +173,12 @@ Mood Face::currentMood() const {
 
 void Face::drawFrame() {
   canvas.fillSprite(background_color_);
+  if (is_away_) {
+    drawAway();
+    drawBadge();
+    canvas.pushSprite(0, 0);
+    return;
+  }
 
   // A slow idle sway, so the face never looks frozen.
   const float t = millis() * 0.0015f;
@@ -302,6 +316,14 @@ void Face::drawBadge() {
   canvas.fillRoundRect(kScreenWidth - width - 4, 4, width, 20, 6, face_color_);
   canvas.setTextColor(background_color_);
   canvas.drawString(badge_, kScreenWidth - width + 2, 6);
+}
+
+void Face::drawAway() {
+  canvas.setFont(&fonts::lgfxJapanGothic_24);
+  canvas.setTextColor(caption_color_);
+  canvas.setTextDatum(middle_center);
+  canvas.drawString(away_text_, kScreenWidth / 2, kScreenHeight / 2);
+  canvas.setTextDatum(top_left);
 }
 
 void Face::drawCaption() {

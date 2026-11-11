@@ -47,6 +47,8 @@ M5Stack CoreS3 の体（`m5-firmware/`）が、デスクトップの `m5-link/` 
 | `snapshot` | 写真を撮る | `id` |
 | `sleep` / `wake` | 眠る・起きる | |
 | `power_save` | 省電力（明るさ 40 まで、顔は 10 回/秒） | `on` |
+| `away` | 頭がもう一つの体（スマホ）にいる。顔を消し、`text` だけを明るさ 30 で出す。音を出さず、反応しない。画面にふれると自分で戻り、そのまま普段どおりに動く（ファーム 0.4.0 から） | `on` `text`（「スマホにいるよ」） |
+| `heard` | 声を聞き取った文（スマホが画面に出す。M5 は読み捨てる） | `text` |
 | `config` | 設定を変えて保存 | `color`（RRGGBB）`volume`（0〜100）`name` |
 
 返事の音声は 16 kHz・モノラル・16 bit の PCM を、1 枚 12 KB までのバイナリで送る（ライブラリの上限は 15 KB）。体は `speak_start` で字幕を出し、0.5 秒分が届いたら話し始め、残りは届いた分から順にスピーカーへ渡す（ファーム 0.3.0 から。それまでは `speak_end` まで待ってから話していたので、14 秒の返事で字幕から声まで 3〜8 秒あいた）。届く速さは話す速さの 4 倍ほどあるので途切れない。字幕から声までは 0.2 秒ほど（2026-11-09 に測った）。字幕は 3 行。それより長いときは、声の進み具合（再生した割合を文字数に当てはめる）に合わせて 1 行ずつ送り、今読んでいる行を 2 行目に置く。話し終わったら最後の 3 行を 4 秒出す（ファーム 0.3.1 から。それまでは 4 行目から先が出なかった）。
@@ -66,7 +68,17 @@ M5Stack CoreS3 の体（`m5-firmware/`）が、デスクトップの `m5-link/` 
 
 頭と 60 秒つながらないときも寝顔になるが、これは眠りではなく、頭が戻ればそのまま起きる。
 
-`state` には `asleep`（眠っているか）、`sleep_reason`（`head` `battery`、頭がいないだけなら `no_head`）、`power_save` も載る。明るさの既定は 80（PetitOnes と同じ）。
+`state` には `asleep`（眠っているか）、`sleep_reason`（`head` `battery`、頭がいないだけなら `no_head`）、`power_save`、`away` も載る。明るさの既定は 80（PetitOnes と同じ）。
+
+## スマホの体
+
+スマホのページ（`/phone/`）も同じ決まりで `/phone/socket?token=` につなぐ。使うのは `hello`、`listen_start`・`0x01` 音声（16 kHz）・`listen_end`、`spoken`、`speech_interrupted` と、受け取る側の `away` `thinking` `face` `caption` `heard` `speak_start`・`0x01`・`speak_end`。スマホだけのものが一つある。
+
+| `t` | いつ | 中身 |
+|---|---|---|
+| `text` | 文字で話した | `text` |
+
+体に話しかける（`listen_start`、文字、「みてみて」）と、頭はその体に移る。もう一方の体には `away` が届く。どちらにいるかは m5-link の `state/presence.json`。
 
 ## 体の設定
 

@@ -44,6 +44,9 @@ class Face {
   // Power save (PetitOnes): brightness capped at kPowerSaveBrightness, 10 frames a second.
   void setPowerSave(bool on);
   bool isPowerSave() const { return power_save_; }
+  // Away: the agent is in the other body (the phone). No face, only where it
+  // went, dim and still, so the agent never looks like two.
+  void setAway(bool away, const String& where);
   void reflexBlink();
 
   // Call every loop; draws at most kFramesPerSecond times a second.
@@ -58,6 +61,7 @@ class Face {
   void drawListeningBar();
   void drawBadge();
   void drawCaption();
+  void drawAway();
   void wrapCaption(int max_width);
   Mood currentMood() const;
   float eyesClosing() const;  // 0 = open, 1 = closed, while falling asleep
@@ -88,6 +92,8 @@ class Face {
   uint32_t fell_asleep_ms_ = 0;
   bool dimmed_for_sleep_ = false;
   bool power_save_ = false;
+  bool is_away_ = false;
+  String away_text_;
 
   uint32_t next_blink_ms_ = 0;
   uint32_t blink_started_ms_ = 0;
@@ -97,6 +103,7 @@ class Face {
   static const uint8_t kAwakeBrightness = 80;
   static const uint8_t kPowerSaveBrightness = 40;
   static const uint8_t kAsleepBrightness = 15;
+  static const uint8_t kAwayBrightness = 30;  // dim, but the words can still be read
   static const uint32_t kFramesPerSecond = 30;
   static const uint32_t kPowerSaveFramesPerSecond = 10;
   static const uint32_t kAsleepFramesPerSecond = 4;  // only the drifting "z" moves

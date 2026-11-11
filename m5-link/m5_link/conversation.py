@@ -1,8 +1,11 @@
 """One turn of conversation: something comes in, the head answers, the body says it.
 
-    voice from the body -> ears -> head -> mouth -> body speaks
-    text from the web page ----------^
-    "みてみて" picture ----(saved)---^
+    voice from a body -> ears -> head -> mouth -> the body the agent is in speaks
+    text from the phone or the web page ^
+    "みてみて" picture ----(saved)------^
+
+The agent is in one body at a time (presence.py): the one the companion last
+turned to, so the reply goes back where the companion spoke.
 
 Other body events (picked up, shaken, someone near) do not start a turn:
 they go into the body diary, and the next turn carries the unread part.
@@ -25,11 +28,15 @@ from .ears import Ears
 from .errands import should_hold
 from .head import Head, HeadReply
 from .mouth import Mouth
+from .presence import Presence
 
 log = logging.getLogger(__name__)
 
 CAPTURE_DIR = REPO_ROOT / "captures"  # ignored by Git in the upstream .gitignore
 DIARY_READER = "conversation"  # this session's read mark in the body diary
+# The input marks the head reads (head.py's system prompt), by the body the words came through.
+VOICE_MARK = {"m5": "声", "phone": "スマホの声"}
+TEXT_MARK = "スマホの文字"
 
 
 @dataclass
@@ -42,21 +49,30 @@ class LogLine:
 
 
 class Conversation:
-    def __init__(self, body: Body, ears: Ears, head: Head, mouth: Mouth, diary: BodyDiary,
+    def __init__(self, presence: Presence, ears: Ears, head: Head, mouth: Mouth, diary: BodyDiary,
                  desires: Desires) -> None:
-        self.body, self.ears, self.head, self.mouth = body, ears, head, mouth
+        self.presence, self.ears, self.head, self.mouth = presence, ears, head, mouth
         self.diary = diary
         self.desires = desires
         self.lines: deque[LogLine] = deque(maxlen=200)
         self._background: set[asyncio.Task] = set()
-        body.on_utterance = self.hear_voice
-        body.on_mitemite = self.see_picture
-        body.on_event = self.feel_event
+        for name, body in presence.bodies.items():
+            body.on_call = lambda name=name: presence.call(name)
+            body.on_connect = lambda name=name: presence.tell(name)
+            body.on_utterance = lambda pcm, is_loop, name=name: self.hear_voice(pcm, is_loop, name)
+            body.on_text = self.read_text
+            body.on_mitemite = self.see_picture
+            body.on_event = self.feel_event
         head.on_errand_report = self.tell_errand_report
+
+    @property
+    def body(self) -> Body:
+        """The body the agent is in now."""
+        return self.presence.body
 
     # ------------------------------------------------------------ inputs
 
-    async def hear_voice(self, pcm: bytes, is_loop: bool) -> None:
+    async def hear_voice(self, pcm: bytes, is_loop: bool, place: str = "m5") -> None:
         seconds = len(pcm) / 2 / 16000
         try:
             text = await self.ears.transcribe(pcm)
@@ -64,11 +80,16 @@ class Conversation:
             log.exception("speech recognition failed")
             await self._say_trouble(f"耳の調子が悪いみたい（{error}）")
             return
-        log.info("heard %.1f s: %s", seconds, text)
+        log.info("heard %.1f s through %s: %s", seconds, place, text)
+        # What was heard, for a screen that can show it (the phone; the M5 ignores it).
+        await self.presence.bodies[place].send({"t": "heard", "text": text})
         if not text:
             await self.body.set_thinking(False)  # in a loop, the body listens again
             return
-        await self.respond(text, source="声")
+        await self.respond(text, source=VOICE_MARK[place])
+
+    async def read_text(self, text: str) -> None:
+        await self.respond(text, source=TEXT_MARK)
 
     async def see_picture(self, jpeg: bytes) -> None:
         CAPTURE_DIR.mkdir(exist_ok=True)

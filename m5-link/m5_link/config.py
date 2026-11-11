@@ -75,6 +75,11 @@ wake_at = ""                # "07:00" to wake the body if the head did not; Peti
 dir = ""                    # "" to turn off
 at = "04:30"                # after the memory sleep
 keep = 14                   # newest zips kept
+
+[phone]
+# The phone page (/phone/), the body taken outside. Open it from the phone
+# through `tailscale serve` with ?token=, then add it to the home screen.
+name = "embodied-claude"    # the app's name on the home screen
 """
 
 
@@ -134,6 +139,11 @@ class BackupConfig:
 
 
 @dataclass(frozen=True)
+class PhoneConfig:
+    name: str = "embodied-claude"
+
+
+@dataclass(frozen=True)
 class LinkConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     head: HeadConfig = field(default_factory=HeadConfig)
@@ -142,6 +152,7 @@ class LinkConfig:
     heartbeat: HeartbeatConfig = field(default_factory=HeartbeatConfig)
     nightly: NightlyConfig = field(default_factory=NightlyConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
+    phone: PhoneConfig = field(default_factory=PhoneConfig)
 
 
 def load_config(path: Path = CONFIG_PATH) -> LinkConfig:
@@ -156,4 +167,5 @@ def load_config(path: Path = CONFIG_PATH) -> LinkConfig:
         heartbeat=HeartbeatConfig(**raw.get("heartbeat", {})),
         nightly=NightlyConfig(**raw.get("nightly", {})),
         backup=BackupConfig(**raw.get("backup", {})),
+        phone=PhoneConfig(**raw.get("phone", {})),
     )

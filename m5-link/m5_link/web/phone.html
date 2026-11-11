@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="{{name}}">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>{{name}}</title>
+<!--
+  The phone as a body (see m5_link/presence.py): the same messages as the M5
+  (docs/m5-body-protocol.ja.md) over /phone/socket, plus typed text. Voice is
+  recorded here, cut at the end of speech, and sent as 16 kHz PCM; the reply
+  comes back the same way and plays here. While the agent is in the M5, this
+  page shows that instead of a face.
+-->
+<style>
+  :root { color-scheme: light; --ink: #222; --soft: #777; --line: #e4e4e4; --accent: #2b6cb0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #fff; color: var(--ink);
+    font-family: -apple-system, "Hiragino Sans", sans-serif; -webkit-text-size-adjust: 100%; }
+  body { display: flex; flex-direction: column; height: 100dvh;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+  header { display: flex; justify-content: space-between; font-size: 13px; color: var(--soft); padding: 10px 0; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; min-height: 0; }
+
+  #face { position: relative; width: 200px; height: 130px; margin: 12px 0 8px; }
+  .eye { position: absolute; top: 20px; width: 26px; height: 52px; border-radius: 13px; background: var(--ink);
+    transition: height .08s, top .08s; }
+  .eye.left { left: 52px; } .eye.right { right: 52px; }
+  #face.blink .eye { height: 6px; top: 43px; }
+  #mouth { position: absolute; left: 80px; top: 92px; width: 40px; height: 6px; border-radius: 3px; background: var(--ink); }
+  #face.happy #mouth { height: 18px; border-radius: 0 0 20px 20px; }
+  #face.sad #mouth { height: 14px; top: 96px; border-radius: 20px 20px 0 0; background: none; border: 5px solid var(--ink); border-bottom: none; }
+  #face.surprised #mouth { left: 88px; width: 24px; height: 24px; border-radius: 12px; }
+  #face.speaking #mouth { animation: talk .22s infinite alternate; }
+  @keyframes talk { from { height: 6px; } to { height: 20px; } }
+  #dots { position: absolute; right: 8px; top: 0; font-size: 28px; letter-spacing: 2px; color: var(--soft); display: none; }
+  #face.thinking #dots { display: block; }
+
+  #away { display: none; flex-direction: column; align-items: center; justify-content: center; height: 150px; }
+  #away p { margin: 4px 0; } #away .where { font-size: 22px; } #away .hint { font-size: 13px; color: var(--soft); }
+  body.away #face { display: none; } body.away #away { display: flex; }
+
+  #caption { min-height: 3.2em; font-size: 18px; line-height: 1.6; text-align: center; padding: 0 4px; }
+  #log { list-style: none; margin: 8px 0 0; padding: 8px 0 0; width: 100%; flex: 1; overflow-y: auto;
+    border-top: 1px solid var(--line); font-size: 14px; line-height: 1.5; }
+  #log li { margin: 0 0 8px; } #log .me { color: var(--soft); text-align: right; }
+  #hint { font-size: 13px; color: var(--soft); text-align: center; min-height: 1.4em; margin: 6px 0; }
+
+  footer { padding: 8px 0 12px; }
+  #talk { display: block; width: 100%; height: 64px; border: none; border-radius: 32px; background: var(--accent);
+    color: #fff; font-size: 20px; font-weight: 600; }
+  #talk.listening { background: #c53030; } #talk.speaking { background: #4a5568; }
+  #talk:disabled { background: #cbd5e0; }
+  #level { height: 4px; margin: 6px 24px 0; border-radius: 2px; background: var(--line); overflow: hidden; }
+  #level div { height: 100%; width: 0; background: #c53030; }
+  form { display: flex; gap: 8px; margin-top: 10px; }
+  input { flex: 1; min-width: 0; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 22px; font-size: 16px; }
+  form button { height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 22px; background: #fff; font-size: 16px; color: var(--ink); }
+</style>
+</head>
+<body>
+<header><span id="where">…</span><span id="link">つないでいる…</span></header>
+<main>
+  <div id="face"><div class="eye left"></div><div class="eye right"></div><div id="mouth"></div><div id="dots">…</div></div>
+  <div id="away"><p class="where"></p><p class="hint">話しかけると、こっちに来る</p></div>
+  <div id="caption"></div>
+  <ol id="log"></ol>
+</main>
+<footer>
+  <div id="hint"></div>
+  <button id="talk" disabled>話す</button>
+  <div id="level"><div></div></div>
+  <form id="type"><input id="text" placeholder="文字で話す" autocomplete="off" enterkeyhint="send"><button>送る</button></form>
+</footer>
+<script>
+"use strict";
+const AUDIO = 0x01, RATE = 16000;
+// As the M5 (m5-firmware/src/voice.cpp), but a longer limit: outside, things take longer to say.
+const END_SILENCE_MS = 900, NO_SPEECH_MS = 6000, MAX_LISTEN_MS = 30000;
+const MIN_SPEECH_RMS = 0.015;      // quieter than this is never speech
+const KEEP_AWAKE_MS = 60 * 1000;   // the screen stays on this long after the last turn
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const token = params.get("token") || "";
+
+let socket = null, audio = null, mic = null, speech = null, wakeLock = null, sleepTimer = null;
+
+// ------------------------------------------------------------ the link
+
+function connect() {
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  socket = new WebSocket(`${scheme}//${location.host}/phone/socket?token=${encodeURIComponent(token)}`);
+  socket.binaryType = "arraybuffer";
+  socket.onopen = () => { send({ t: "hello", name: "phone" }); $("link").textContent = ""; $("talk").disabled = false; };
+  socket.onclose = () => {
+    $("link").textContent = "つながっていない";
+    $("talk").disabled = true;
+    stopListening("cancelled", false);
+    stopSpeech(false);
+    setTimeout(connect, 2000);
+  };
+  socket.onmessage = (event) => typeof event.data === "string" ? onMessage(JSON.parse(event.data)) : onAudio(event.data);
+}
+
+function send(message) {
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+
+function onMessage(message) {
+  switch (message.t) {
+    case "away":
+      document.body.classList.toggle("away", message.on);
+      $("where").textContent = message.on ? "" : "ここにいる";
+      document.querySelector("#away .where").textContent = message.text || "";
+      break;
+    case "thinking": setThinking(message.on !== false); break;
+    case "face": showMood(message.mood, message.ms); break;
+    case "caption": $("caption").textContent = message.text || ""; break;
+    case "heard": if (message.text) addLog(message.text, true); else $("hint").textContent = "聞き取れなかった"; break;
+    case "speak_start": beginSpeech(message.text || ""); break;
+    case "speak_end": if (speech) { speech.ended = true; finishSpeechIfDone(); } else send({ t: "spoken" }); break;
+  }
+}
+
+// ------------------------------------------------------------ hearing the reply
+
+function ensureAudio() {
+  if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+  if (audio.state !== "running") audio.resume();
+}
+
+function beginSpeech(text) {
+  setThinking(false);
+  stopSpeech(false);
+  $("caption").textContent = text;
+  addLog(text, false);
+  keepAwake();
+  if (!audio || audio.state !== "running") {  // iOS plays sound only after a touch on the page
+    $("hint").textContent = "画面にふれると、声も聞こえるようになる";
+    speech = { sources: [], playHead: 0, ended: false, pending: 0, silent: true };
+    return;
+  }
+  speech = { sources: [], playHead: 0, ended: false, pending: 0, silent: false };
+  setSpeaking(true);
+}
+
+function onAudio(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (!speech || speech.silent || bytes[0] !== AUDIO || bytes.length < 3) return;
+  const pcm = new Int16Array(buffer.slice(1, 1 + ((bytes.length - 1) & ~1)));
+  const samples = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) samples[i] = pcm[i] / 32768;
+  const chunk = audio.createBuffer(1, samples.length, RATE);
+  chunk.copyToChannel(samples, 0);
+  const source = audio.createBufferSource();
+  source.buffer = chunk;
+  source.connect(audio.destination);
+  const startAt = Math.max(speech.playHead, audio.currentTime + 0.1);
+  source.start(startAt);
+  speech.playHead = startAt + chunk.duration;
+  speech.pending++;
+  const current = speech;
+  source.onended = () => { current.pending--; if (current === speech) finishSpeechIfDone(); };
+  speech.sources.push(source);
+}
+
+function finishSpeechIfDone() {
+  if (!speech || !speech.ended || speech.pending > 0) return;
+  speech = null;
+  setSpeaking(false);
+  send({ t: "spoken" });
+}
+
+function stopSpeech(tell) {
+  if (!speech) return;
+  for (const source of speech.sources) { source.onended = null; try { source.stop(); } catch (_) {} }
+  speech = null;
+  setSpeaking(false);
+  if (tell) send({ t: "speech_interrupted" });
+}
+
+// ------------------------------------------------------------ talking
+
+async function startListening() {
+  ensureAudio();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (error) {
+    $("hint").textContent = "マイクが使えない（" + error.name + "）";
+    return;
+  }
+  const source = audio.createMediaStreamSource(stream);
+  const processor = audio.createScriptProcessor(4096, 1, 1);
+  mic = { stream, source, processor, resample: makeResampler(audio.sampleRate, RATE),
+          startedAt: performance.now(), heard: false, quietSince: 0, floor: 1 };
+  processor.onaudioprocess = (event) => onMicBlock(event.inputBuffer.getChannelData(0));
+  source.connect(processor);
+  processor.connect(audio.destination);  // Safari runs the processor only when it is connected
+  send({ t: "listen_start", loop: false });
+  $("hint").textContent = "";
+  $("talk").classList.add("listening");
+  $("talk").textContent = "聞いてる（タップで送る）";
+  keepAwake();
+}
+
+function onMicBlock(samples) {
+  if (!mic) return;
+  const pcm = mic.resample(samples);
+  const frame = new Uint8Array(1 + pcm.byteLength);
+  frame[0] = AUDIO;
+  frame.set(new Uint8Array(pcm.buffer), 1);
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(frame);
+
+  // The end of speech: louder than the room for a while, then quiet for END_SILENCE_MS.
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  const rms = Math.sqrt(sum / samples.length);
+  mic.floor = Math.min(mic.floor * 1.02, Math.max(rms, 0.002));  // the room, rising slowly
+  const isSpeech = rms > Math.max(MIN_SPEECH_RMS, mic.floor * 3);
+  $("level").firstElementChild.style.width = Math.min(100, rms * 400) + "%";
+  const now = performance.now();
+  if (isSpeech) { mic.heard = true; mic.quietSince = 0; }
+  else if (mic.heard && !mic.quietSince) mic.quietSince = now;
+  if (mic.heard && mic.quietSince && now - mic.quietSince > END_SILENCE_MS) stopListening("silence");
+  else if (!mic.heard && now - mic.startedAt > NO_SPEECH_MS) stopListening("no_speech");
+  else if (now - mic.startedAt > MAX_LISTEN_MS) stopListening("max_length");
+}
+
+function stopListening(reason, tell = true) {
+  if (!mic) return;
+  mic.processor.onaudioprocess = null;
+  mic.processor.disconnect();
+  mic.source.disconnect();
+  mic.stream.getTracks().forEach((track) => track.stop());  // so the reply plays on the speaker, not the earpiece
+  mic = null;
+  $("talk").classList.remove("listening");
+  $("talk").textContent = "話す";
+  $("level").firstElementChild.style.width = "0";
+  if (!tell) return;
+  send({ t: "listen_end", reason });
+  if (reason === "no_speech") $("hint").textContent = "何も聞こえなかった";
+  else if (reason !== "cancelled") setThinking(true);
+}
+
+// 16-bit PCM at `toRate` from the context's float samples, averaging what falls into each output sample.
+function makeResampler(fromRate, toRate) {
+  const step = fromRate / toRate;
+  let carry = new Float32Array(0);
+  return (block) => {
+    const input = new Float32Array(carry.length + block.length);
+    input.set(carry);
+    input.set(block, carry.length);
+    const count = Math.floor(input.length / step);
+    const out = new Int16Array(count);
+    for (let k = 0; k < count; k++) {
+      const start = Math.floor(k * step), end = Math.max(start + 1, Math.floor((k + 1) * step));
+      let sum = 0;
+      for (let i = start; i < end; i++) sum += input[i];
+      out[k] = Math.max(-1, Math.min(1, sum / (end - start))) * 32767;
+    }
+    carry = input.slice(Math.floor(count * step));
+    return out;
+  };
+}
+
+$("talk").addEventListener("click", () => {
+  ensureAudio();
+  if (speech) stopSpeech(true);
+  else if (mic) stopListening("silence");
+  else startListening();
+});
+
+$("type").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = $("text").value.trim();
+  if (!text || !socket || socket.readyState !== WebSocket.OPEN) return;
+  ensureAudio();
+  send({ t: "text", text });
+  addLog(text, true);
+  $("text").value = "";
+  $("text").blur();
+  setThinking(true);
+  keepAwake();
+});
+
+// iOS starts sound only from a touch: the first touch anywhere unlocks it.
+for (const kind of ["touchend", "click"]) document.addEventListener(kind, ensureAudio, { once: true });
+
+// ------------------------------------------------------------ the face and the page
+
+function setThinking(on) { $("face").classList.toggle("thinking", on); }
+
+function setSpeaking(on) {
+  $("face").classList.toggle("speaking", on);
+  $("talk").classList.toggle("speaking", on);
+  $("talk").textContent = on ? "話してる（タップで止める）" : "話す";
+}
+
+let moodTimer = null;
+function showMood(mood, ms) {
+  const face = $("face");
+  face.classList.remove("happy", "sad", "surprised");
+  if (["happy", "sad", "surprised"].includes(mood)) face.classList.add(mood);
+  clearTimeout(moodTimer);
+  if (ms) moodTimer = setTimeout(() => face.classList.remove("happy", "sad", "surprised"), ms);
+}
+
+(function blink() {
+  $("face").classList.add("blink");
+  setTimeout(() => $("face").classList.remove("blink"), 140);
+  setTimeout(blink, 2000 + Math.random() * 4000);
+})();
+
+function addLog(text, isMine) {
+  const item = document.createElement("li");
+  item.textContent = text;
+  if (isMine) item.className = "me";
+  $("log").appendChild(item);
+  while ($("log").children.length > 40) $("log").firstElementChild.remove();
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+// Keep the screen on through a conversation, and let it sleep a minute after.
+async function keepAwake() {
+  clearTimeout(sleepTimer);
+  sleepTimer = setTimeout(() => { if (wakeLock) wakeLock.release(); wakeLock = null; }, KEEP_AWAKE_MS);
+  if (wakeLock || !("wakeLock" in navigator)) return;
+  try { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.onrelease = () => { wakeLock = null; }; } catch (_) {}
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { stopListening("cancelled"); stopSpeech(true); }
+});
+
+connect();
+</script>
+</body>
+</html>

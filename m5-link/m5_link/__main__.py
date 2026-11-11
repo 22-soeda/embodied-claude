@@ -25,6 +25,7 @@ from .head import Head
 from .heartbeat import Heartbeat
 from .nightly import Nightly
 from .mouth import Mouth
+from .presence import Presence
 from .server import build_app
 
 log = logging.getLogger("m5_link")
@@ -87,17 +88,18 @@ async def main() -> None:
     version = code_version()
     log.info("m5-link starting at %s", version)
 
-    body = Body()
+    m5, phone = Body("M5"), Body("phone")
     diary = BodyDiary(STATE_DIR / "body-diary")
-    desires = Desires(body, diary, config.head.companion_name)
+    presence = Presence({"m5": m5, "phone": phone}, STATE_DIR / "presence.json", diary)
+    desires = Desires(m5, diary, config.head.companion_name)
     ears = Ears(config.ears)
     mouth = Mouth(config.mouth)
     head = Head(config.head)
     heartbeat = Heartbeat(config.heartbeat, diary, desires, config.head.companion_name)
-    nightly = Nightly(config.nightly, config.head, diary, body, config.backup)
-    conversation = Conversation(body, ears, head, mouth, diary, desires)
+    nightly = Nightly(config.nightly, config.head, diary, m5, config.backup)
+    conversation = Conversation(presence, ears, head, mouth, diary, desires)
 
-    runner = web.AppRunner(build_app(config, body, conversation, heartbeat, nightly, version))
+    runner = web.AppRunner(build_app(config, conversation, heartbeat, nightly, version))
     await runner.setup()
     await web.TCPSite(runner, config.server.host, config.server.port).start()
 

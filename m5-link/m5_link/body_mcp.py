@@ -44,7 +44,7 @@ def _call(method: str, path: str, payload: dict | None = None, timeout: float = 
 
 @mcp.tool()
 def say(text: str, mood: str | None = None) -> str:
-    """Speak out loud through the M5 body's speaker; the words also show on its screen.
+    """Speak out loud through the body you are in (the M5's speaker, or the phone); the words also show on its screen.
 
     Use it when someone is likely near the body (see get_body_state: near,
     recent touches). Keep it to one or two short spoken sentences. Outward
@@ -115,14 +115,16 @@ def see() -> list:
 
 @mcp.tool()
 def get_body_state() -> str:
-    """Whether the body is connected and awake (asleep, and why), its battery, Wi-Fi, power save,
-    and whether something is near its screen."""
+    """Whether the M5 body is connected and awake (asleep, and why), its battery, Wi-Fi, power save,
+    and whether something is near its screen; and which body you are in ("in": m5 or phone)."""
     status = _call("GET", "/api/status")
     if status.get("error"):
         return status["error"]
     body = status["body"]
     return json.dumps(
-        {"connected": body["connected"], "state": body["state"], "speaking": body["speaking"]},
+        {"connected": body["connected"], "state": body["state"], "speaking": body["speaking"],
+         # One body at a time: "m5" at home, or "phone" when the companion last talked through it.
+         "in": status["where"], "phone_open": status["phone"]["connected"]},
         ensure_ascii=False,
     )
 

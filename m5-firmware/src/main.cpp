@@ -11,6 +11,7 @@
 //   long press talk back and forth until a turn ends in silence
 //   swipe      "みてみて": take a picture and show it to the head
 //   asleep     three quick taps wake it; anything else is only noted
+//   away       any touch calls the agent back, then does what it always does
 //
 // Sleep, as PetitOnes' bodies sleep: the head puts the body to sleep (and
 // wakes it), or the body sleeps by itself when the battery reaches 10 %.
@@ -18,6 +19,11 @@
 // body neither listens nor speaks until it is woken by the head or by three
 // quick taps. A body that has lost its head for a minute also shows its
 // sleeping face, but wakes as soon as the head is back.
+//
+// Away: the agent is in one body at a time, the M5 or the phone (m5-link's
+// presence.py). While it is in the phone, m5-link tells this body it is away:
+// no face, only where the agent went, no sound, no reactions. Touching the
+// screen calls the agent back here. Being away is not sleeping.
 //
 // Structure and many details follow PetitOnes/m5-petit-firmware (MIT): the
 // procedural face, Wi-Fi slots tried in order, the shared mic/speaker port,
@@ -37,7 +43,7 @@
 #include "wifi_keeper.h"
 
 namespace {
-const char* kFirmwareVersion = "0.3.1";
+const char* kFirmwareVersion = "0.4.0";
 
 const uint32_t kSleepAfterHeadLostMs = 60 * 1000;
 const uint32_t kThinkingGiveUpMs = 90 * 1000;
@@ -59,6 +65,7 @@ int taps_while_asleep = 0;
 uint32_t last_tap_while_asleep_ms = 0;
 uint32_t last_battery_check_ms = 0;
 bool skipping_speech_while_asleep = false;
+bool is_away = false;
 uint32_t thinking_since_ms = 0;
 uint32_t last_state_report_ms = 0;
 uint32_t last_serial_heartbeat_ms = 0;
@@ -102,6 +109,7 @@ void sendState() {
   message["asleep"] = sleep_reason != SleepReason::Awake;
   message["sleep_reason"] = sleepReasonName();
   message["power_save"] = face.isPowerSave();
+  message["away"] = is_away;
   brainLink.sendJson(message);
   last_state_report_ms = millis();
 }
@@ -142,6 +150,21 @@ void wakeUp(const char* reason) {
   taps_while_asleep = 0;
   voice.playChime(Chime::WakeUp);
   sendEvent("woke", reason);
+  sendState();
+}
+
+void setAway(bool away, const char* where) {
+  if (away && !is_away) {
+    if (voice.isListening()) cancelListening();
+    if (voice.isSpeaking()) {
+      voice.stopSpeaking();
+      sendType("speech_interrupted");
+    }
+    is_conversation_loop = false;
+    face.setActivity(Activity::None);
+  }
+  is_away = away;
+  face.setAway(away, away ? where : "");
   sendState();
 }
 
@@ -276,7 +299,7 @@ void onHeadMessage(JsonDocument& message) {
   } else if (strcmp(type, "look") == 0) {
     face.lookAt(message["x"] | 0, message["y"] | 0, message["ms"] | 3000);
   } else if (strcmp(type, "speak_start") == 0) {
-    if (isAsleep()) {  // no sound while asleep; tell the head it is done at speak_end
+    if (isAsleep() || is_away) {  // no sound while asleep or away; tell the head it is done at speak_end
       skipping_speech_while_asleep = true;
       return;
     }
@@ -305,7 +328,7 @@ void onHeadMessage(JsonDocument& message) {
       if (is_conversation_loop) startListening(true);  // nothing to say; keep listening
     }
   } else if (strcmp(type, "listen") == 0) {
-    if (!isAsleep()) startListening(message["loop"] | is_conversation_loop);
+    if (!isAsleep() && !is_away) startListening(message["loop"] | is_conversation_loop);
   } else if (strcmp(type, "stop_listening") == 0) {
     if (voice.isListening()) cancelListening();
   } else if (strcmp(type, "snapshot") == 0) {
@@ -317,6 +340,8 @@ void onHeadMessage(JsonDocument& message) {
   } else if (strcmp(type, "power_save") == 0) {
     face.setPowerSave(message["on"] | true);
     sendState();
+  } else if (strcmp(type, "away") == 0) {
+    setAway(message["on"] | false, message["text"] | "");
   } else if (strcmp(type, "config") == 0) {
     applyConfig(message);
   }
@@ -343,6 +368,9 @@ void handleTouch() {
   if (isAsleep()) {
     handleTouchWhileAsleep(touch);
     return;
+  }
+  if (is_away && (touch.wasFlicked() || touch.wasHold() || touch.wasClicked())) {
+    setAway(false, "");  // called back; m5-link moves the agent here at listen_start or the picture
   }
 
   if (touch.wasFlicked()) {
@@ -376,7 +404,7 @@ void handleTouch() {
 void reactToBodyEvent(BodyEvent event) {
   if (event == BodyEvent::None) return;
   sendEvent(bodyEventName(event));
-  if (isAsleep()) return;  // noted, but a sleeping face does not react
+  if (isAsleep() || is_away) return;  // noted, but a sleeping or empty body does not react
   if (event == BodyEvent::PickedUp || event == BodyEvent::Shaken) {
     face.showMood(Mood::Surprised, 1500);
   } else if (event == BodyEvent::Near) {
@@ -397,6 +425,7 @@ String writeStatusJson() {
   status["asleep"] = isAsleep();
   status["sleep_reason"] = sleepReasonName();
   status["power_save"] = face.isPowerSave();
+  status["away"] = is_away;
   status["listening"] = voice.isListening();
   status["speaking"] = voice.isSpeaking();
   status["battery"] = senses.batteryPercent();
